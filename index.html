@@ -150,6 +150,23 @@ table.grid tr:hover td{background:rgba(74,158,255,.06)}
 .lg .t .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
 .lg .d{font-size:11.5px;color:var(--txt2);line-height:1.6}
 .cmpnote{font-size:12px;color:var(--txt2);background:var(--panel2);padding:8px 12px;border-radius:9px;margin-bottom:14px;line-height:1.7}
+/* 图卡内一行动态结论（结论跟着图表走） */
+.concl{margin-top:12px;font-size:12.5px;line-height:1.75;color:var(--txt2);background:rgba(74,158,255,.07);border-left:3px solid var(--accent);border-radius:8px;padding:10px 14px}
+.concl b{color:var(--txt);font-weight:600}
+.concl .up{color:#ff7a85;font-weight:600}
+.concl .dn{color:#4cd98a;font-weight:600}
+/* 标题行 ⓘ 悬浮口径提示 */
+.tipwrap{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--txt2);font-size:10px;font-weight:600;cursor:help;position:relative;margin-left:4px;vertical-align:1px;flex:none}
+.tipwrap:hover{color:var(--cyan);border-color:var(--accent)}
+.tipwrap:hover:after{content:attr(data-tip);position:absolute;left:24px;top:-4px;background:#0d1830;border:1px solid var(--line);color:var(--txt2);font-size:11px;font-weight:400;padding:8px 12px;border-radius:8px;width:300px;white-space:normal;line-height:1.65;z-index:99;text-align:left;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+/* 详细口径折叠（默认收起，点击展开） */
+details.kd{margin-top:6px}
+details.kd summary{cursor:pointer;color:var(--accent);font-size:11.5px;user-select:none;list-style:none}
+details.kd summary::-webkit-details-marker{display:none}
+details.kd summary:before{content:"ⓘ 展开详细口径"}
+details.kd[open] summary:before{content:"ⓘ 收起详细口径"}
+details.kd .kd-body{margin-top:8px;padding:10px 14px;background:rgba(0,0,0,.18);border-radius:8px;font-size:11.5px;line-height:1.85;color:var(--txt2)}
+details.kd .kd-body code{color:var(--txt);background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:11px}
 .co{color:var(--cyan)}.gv{color:var(--green)}.rv{color:var(--red)}
 /* 图三 多选下拉 */
 .multiselect{position:relative;min-width:250px}
@@ -202,19 +219,27 @@ table.grid tr:hover td{background:rgba(74,158,255,.06)}
         <div class="crumb">全国概览 <span>›</span> <b id="ov-title">2026年7月 代理购电价格</b></div>
         <div class="switchhint">汇总口径：32省（含冀北 / 河北南网 / 蒙西 / 蒙东）</div>
       </div>
-      <div class="note" id="ov-note"></div>
       <div class="kpis" id="ov-kpis"></div>
+
+      <div class="card">
+        <h2><span class="dot"></span>全国综合平段电价（电网代购）月度走势<span class="tipwrap" data-tip="综合平段电价＝购电价＋上网环节线损＋电度输配电价＋政府性基金及附加＋系统运行费折价。2026 年电度输配电价随电压等级联动（1—7 月老版 / 8—9 月新版），2025 年为各省权威发布值。">ⓘ</span></h2>
+        <div class="sub">单位：元/千瓦时 · 实线＝2026 全国均价 · 虚线＝2025 全国均价 · 阴影带＝2026 省间最高—最低区间</div>
+        <div class="chart" id="ov-trend"></div>
+        <div class="concl" id="ov-trend-concl"></div>
+      </div>
 
       <div class="card">
         <h2><span class="dot"></span><span id="ov-rank-title">2026年7月 代理购电价格排序</span></h2>
         <div class="sub" id="ov-rank-sub">单位：元/千瓦时 · 按价格从高到低</div>
         <div class="chart" id="ov-rank"></div>
+        <div class="concl" id="ov-rank-concl"></div>
       </div>
 
       <div class="card">
         <h2><span class="dot"></span><span id="ov-vol-title">2026年7月 代理购电规模排序</span></h2>
         <div class="sub" id="ov-vol-sub">单位：万千瓦时 · 优先发电 / 市场交易采购 拆分</div>
         <div class="chart tall" id="ov-vol"></div>
+        <div class="concl" id="ov-vol-concl"></div>
       </div>
     </div>
 
@@ -224,12 +249,12 @@ table.grid tr:hover td{background:rgba(74,158,255,.06)}
         <div class="crumb">地区详情 <span>›</span> <b id="rg-title">江苏</b></div>
         <div class="switchhint">在左侧选择省份</div>
       </div>
-      <div class="formula" id="rg-formula"></div>
       <div class="kpis" id="rg-kpis"></div>
       <div class="card">
-        <h2><span class="dot"></span><span id="rg-trend-title">月度价格与购电规模走势</span></h2>
-        <div class="sub">价格：元/千瓦时（折线，左轴） · 电量：万千瓦时（柱，右轴）</div>
+        <h2><span class="dot"></span><span id="rg-trend-title">月度价格与购电规模走势</span><span class="tipwrap" data-tip="综合平段电价＝购电价＋上网环节线损＋电度输配电价＋政府性基金及附加＋系统运行费折价；其中电度输配电价随电压等级联动，其余四项全省一致。">ⓘ</span></h2>
+        <div class="sub" id="rg-trend-sub">价格：元/千瓦时（折线，左轴） · 电量：万千瓦时（柱，右轴）</div>
         <div class="chart tall" id="rg-trend"></div>
+        <div class="concl" id="rg-trend-concl"></div>
       </div>
       <div class="card">
         <h2><span class="dot"></span>月度价格构成明细</h2>
@@ -242,23 +267,33 @@ table.grid tr:hover td{background:rgba(74,158,255,.06)}
     <div class="view" id="view-compare">
       <div class="pagehead"><div class="crumb">趋势对比 <span>›</span> <b>多省跨年走势与构成</b></div></div>
       <div class="cmpnote">
-        <b class="co">口径说明</b>（均取自「全国电网代购价统计表1 · 首页+选择功能」）：
-        <b class="rv">综合平段电价‑‑电网代购</b> ＝ 代理购电价格 ＋ 上网环节线损电价 ＋ 电度输配电价 ＋ 政府性基金及附加 ＋ 系统运行费折价；
-        <b class="gv">综合平段电价‑‑入市交易</b> ＝ 入市交易购电价格 ＋ 上网环节线损电价 ＋ 电度输配电价 ＋ 政府性基金及附加 ＋ 系统运行费折价。
-        本板块的<b>图一、图二</b>跟随左侧<b>当前选中省份（<b id="cmp-cur-prov" class="rv"></b>）</b>，展示该省 2025 vs 2026 走势与构成；
-        <b>图三</b>为多省跨年横向对比，可在卡片内<b class="co">自定义勾选要对比的省份</b>。当前电压等级：<b id="cmp-volt-tag"></b>。
+        <b class="co">口径</b>：<b class="rv">电网代购</b> / <b class="gv">入市交易</b> 综合平段电价均＝购电价＋上网环节线损＋电度输配电价＋政府性基金及附加＋系统运行费（五项之和，仅购电价一项不同） · 图一 / 图二跟随左侧当前省份（<b id="cmp-cur-prov" class="rv"></b>） · 图三可自定义勾选省份 · 当前电压等级：<b id="cmp-volt-tag"></b>
+        <details class="kd"><summary></summary><div class="kd-body">
+          <b class="rv">综合平段电价‑‑电网代购</b> ＝ <code>代理购电价格</code> ＋ 上网环节线损电价 ＋ 电度输配电价 ＋ 政府性基金及附加 ＋ 系统运行费折价；<br>
+          <b class="gv">综合平段电价‑‑入市交易</b> ＝ <code>入市交易购电价格</code> ＋ 上网环节线损电价 ＋ 电度输配电价 ＋ 政府性基金及附加 ＋ 系统运行费折价。<br>
+          数据均取自「全国电网代购价统计表1 · 首页+选择功能」；电度输配电价随电压等级联动，其余四项全省一致。
+        </div></details>
       </div>
 
       <div class="card">
         <h2><span class="dot"></span>图一 · <span id="cmp-c1-title">江苏</span> 2025 vs 2026 代理购电价格</h2>
         <div class="sub" id="cmp-c1-sub">单位：元/千瓦时 · 2025全年12月 / 2026年1—9月</div>
         <div class="chart" id="cmp-c1"></div>
+        <div class="concl" id="cmp-c1-concl"></div>
       </div>
 
       <div class="card">
         <h2><span class="dot"></span>图二 · <span id="cmp-c2-title">江苏</span> 综合平段电价构成（跨年 2025.1 → 2026.9）</h2>
         <div class="sub" id="cmp-c2-sub">单位：元/千瓦时 · 江苏 · 堆叠=五项构成，折线=综合平段合计</div>
         <div class="chart tall" id="cmp-c2"></div>
+        <div class="concl" id="cmp-c2-concl"></div>
+      </div>
+
+      <div class="card">
+        <h2><span class="dot"></span>图二·B · <span id="cmp-c2b-title">江苏</span> 综合平段电价构成占比走势<span class="tipwrap" data-tip="五项构成占综合平段电价（电网代购）的比重，100% 堆叠面积。构成占比变化可直接看出"谁在推高/拉低电价"。">ⓘ</span></h2>
+        <div class="sub">单位：% · 跨年 2025.1 → 2026.9 · 面积宽度=该项占比</div>
+        <div class="chart" id="cmp-c2b"></div>
+        <div class="concl" id="cmp-c2b-concl"></div>
       </div>
 
       <div class="card">
@@ -274,19 +309,33 @@ table.grid tr:hover td{background:rgba(74,158,255,.06)}
         </div>
         <div class="sub" id="cmp-c3-sub">单位：元/千瓦时 · 冀北 / 北京 / 天津 / 山西 / 上海 · 2025.1 → 2026.9</div>
         <div class="chart tall" id="cmp-c3"></div>
+        <div class="concl" id="cmp-c3-concl"></div>
       </div>
     </div>
 
     <!-- ============ 入市签约对比 ============ -->
     <div class="view" id="view-russi">
       <div class="pagehead"><div class="crumb">入市签约对比 <span>›</span> <b>世纪互联签约价 vs 电网代购价</b></div></div>
-      <div class="note" id="rus-note"></div>
-      <div class="formula" id="rus-formula"></div>
+      <div class="cmpnote">
+        <b class="co">口径</b>：基于《分表5-2026入市购电价格》（世纪互联与售电公司签订的固定入市购电价）与各省「电网代购」综合平段电价对比 · 差值＜0 表示入市更划算 · 当前电压等级：<b id="rus-volt-tag"></b>
+        <details class="kd"><summary></summary><div class="kd-body">
+          <b class="co">综合平段电价‑‑入市交易</b> = <code>入市交易购电价格(签约价)</code> + 上网环节线损电价 + 电度输配电价 + 政府性基金及附加 + 系统运行费折价；<br>
+          <b class="rv">综合平段电价‑‑电网代购</b> = <code>代理购电价格</code> + 同上四项。两者仅「购电价」一项不同，故差价 ≈ 签约入市价 − 代理购电价格。<br>
+          数据提示：2025 年仅北京、冀北公布入市交易价格，其余省份无可比数据。
+        </div></details>
+      </div>
       <div class="kpis" id="rus-kpis"></div>
       <div class="card">
         <h2><span class="dot"></span>入市交易 与 电网代购 综合平段电价对比</h2>
         <div class="sub">单位：元/千瓦时 · 2026年各月 · 柱=综合平段电价【入市交易】 / 【电网代购】，差值=入市 − 代购</div>
         <div class="chart tall" id="rus-chart"></div>
+        <div class="concl" id="rus-chart-concl"></div>
+      </div>
+      <div class="card">
+        <h2><span class="dot"></span>入市 − 代购 差值 月度走势（签约省）<span class="tipwrap" data-tip="差值 = 综合平段电价【入市交易】−【电网代购】。0 线以下（负值）表示入市更省，以上表示入市更贵。">ⓘ</span></h2>
+        <div class="sub">单位：元/千瓦时 · 2026年1—9月 · 每条曲线=一个签约省 · 0线以下=入市更省</div>
+        <div class="chart tall" id="rus-diff"></div>
+        <div class="concl" id="rus-diff-concl"></div>
       </div>
       <div class="card">
         <h2><span class="dot"></span>签约价 划算程度明细表</h2>
@@ -301,6 +350,7 @@ table.grid tr:hover td{background:rgba(74,158,255,.06)}
         </div>
         <div class="sub" id="rus-trend-sub"></div>
         <div class="chart tall" id="rus-trend"></div>
+        <div class="concl" id="rus-trend-concl"></div>
       </div>
     </div>
 
@@ -405,14 +455,7 @@ function renderOverview(){
   const avg=arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
   const diff=(max!=null&&min!=null)?max-min:null;
 
-  const note=document.getElementById("ov-note");
-  if(curRankKey==="代理购电价格"){
-    note.innerHTML="指标：<b>代理购电价格</b>（元/千瓦时）· 电压等级：<b>"+VOLT_LABEL[curVolt]+"</b> · 2026年"+m+" 汇总"+n+"省。<br>说明：代理购电价格即电网企业代理工商业用户从发电企业购电的统一购电价格（不含输配电费与基金附加）。";
-  }else if(isRus){
-    note.innerHTML="指标：<b>综合平段电价‑‑入市交易</b>（元/千瓦时）· 电压等级：<b>"+VOLT_LABEL[curVolt]+"</b> · 2026年"+m+" 汇总"+n+"省（未公布入市价的省份已隐藏）。<br>说明：<b class='co'>综合平段电价‑‑入市交易</b> = <code>入市交易购电价格</code> + 上网环节线损电价 + 电度输配电价 + 政府性基金及附加 + 系统运行费折价。";
-  }else{
-    note.innerHTML="指标：<b>综合平段电价‑‑电网代购</b>（元/千瓦时）· 电压等级：<b>"+VOLT_LABEL[curVolt]+"</b> · 2026年"+m+" 汇总"+n+"省。<br>说明：<b class='co'>综合平段电价‑‑电网代购</b> = 代理购电价格 + 上网环节线损电价 + 电度输配电价 + 政府性基金及附加 + 系统运行费折价。（其中电度输配电价按所选电压等级取值，其余四项全省一致）";
-  }
+  // 口径说明已精简：移入各图卡标题 ⓘ 悬浮提示与动态结论行
 
   const kpis=[
     {lab:"最高价格",num:fmt(max),c:"c-red",sub:lab+" · 最高",icon:"▲"},
@@ -426,10 +469,62 @@ function renderOverview(){
   document.getElementById("ov-title").textContent="2026年"+m+" "+lab;
   document.getElementById("ov-rank-title").textContent="2026年"+m+" "+lab+"排序";
   document.getElementById("ov-rank-sub").textContent="单位：元/千瓦时 · "+VOLT_LABEL[curVolt]+" · 按价格从高到低";
+  drawOvTrend();
   drawRank(vals);
+  // 排序图动态结论
+  const rc=document.getElementById("ov-rank-concl");
+  if(vals.length){
+    rc.innerHTML="汇总 <b>"+vals.length+"</b> 省 · 最高 <b>"+vals[0][0]+" "+fmt(vals[0][1])+"</b> · 最低 <b>"+vals[vals.length-1][0]+" "+fmt(vals[vals.length-1][1])+"</b> · 极差 <b>"+fmt(diff)+"</b> 元/千瓦时 · 前三："+vals.slice(0,3).map(v=>v[0]).join("、")+"。";
+  }
   document.getElementById("ov-vol-title").textContent="2026年"+curVolMonth+" 代理购电规模排序";
   document.getElementById("ov-vol-sub").textContent="单位：万千瓦时 · 优先发电（绿） / 市场交易采购（蓝）";
   drawVol(curVolMonth);
+}
+
+function drawOvTrend(){
+  const c=echInit("ov-trend");
+  const ms=M12s();
+  const n25=[],n26=[],max26=[],min26=[],hi26=[],lo26=[];
+  ms.forEach((mm,i)=>{
+    let s25=[],s26=[];
+    for(const p of ORDPROVS){
+      const v25=cp25byVolt(p,"zonghe_dg")[i];
+      if(v25!=null) s25.push([v25,p]);
+      if(i<9){ const v26=jd(d(p,curVolt,mm).zonghe_dg); if(v26!=null) s26.push([v26,p]); }
+    }
+    const avg=a=>a.length?a.reduce((s,x)=>s+x[0],0)/a.length:null;
+    n25.push(avg(s25)); n26.push(i<9?avg(s26):null);
+    if(i<9&&s26.length){ s26.sort((a,b)=>b[0]-a[0]); max26.push(s26[0][0]); hi26.push(s26[0][1]); min26.push(s26[s26.length-1][0]); lo26.push(s26[s26.length-1][1]); }
+    else{ max26.push(null); min26.push(null); hi26.push(null); lo26.push(null); }
+  });
+  const band=min26.map((v,i)=>(v!=null&&max26[i]!=null)?Number((max26[i]-v).toFixed(6)):null);
+  c.setOption({
+    backgroundColor:"transparent",
+    grid:{left:48,right:20,top:36,bottom:26},
+    tooltip:{trigger:"axis",backgroundColor:"#1d2f47",borderColor:"#2a3d5c",textStyle:{color:"#e8eef7"},
+      formatter:(ps)=>{let h=ps[0].name+"<br>";ps.forEach(p=>{if(p.value==null||p.seriesName==="2026 省间最低")return;if(p.seriesName==="区间带宽")return;h+=p.marker+p.seriesName+": <b>"+Number(p.value).toFixed(4)+"</b> 元/千瓦时<br>";});return h;}},
+    legend:{top:0,textStyle:{color:"#93a7c4",fontSize:11.5},data:["2025 全国均价","2026 全国均价"]},
+    xAxis:{type:"category",data:ms.map(x=>x.replace("月","")),axisLabel:{color:"#93a7c4",fontSize:10.5},axisLine:{lineStyle:{color:"#2a3d5c"}}},
+    yAxis:{type:"value",name:"元/千瓦时",nameTextStyle:{color:"#93a7c4"},scale:true,axisLabel:{color:"#93a7c4"},splitLine:{lineStyle:{color:"#2a3d5c"}}},
+    series:[
+      {name:"2026 省间最低",type:"line",data:min26,stack:"band",symbol:"none",lineStyle:{width:0},silent:true,tooltip:{show:false}},
+      {name:"区间带宽",type:"line",data:band,stack:"band",symbol:"none",lineStyle:{width:0},areaStyle:{color:"rgba(74,158,255,.12)"},silent:true},
+      {name:"2025 全国均价",type:"line",data:n25,symbol:"none",smooth:true,lineStyle:{width:2,color:"#8b7cf6",type:"dashed",opacity:.9},itemStyle:{color:"#8b7cf6"}},
+      {name:"2026 全国均价",type:"line",data:n26,symbol:"circle",symbolSize:5,smooth:true,z:5,lineStyle:{width:3,color:"#4a9eff"},itemStyle:{color:"#4a9eff"},
+        markLine:{silent:true,symbol:"none",lineStyle:{color:"#ff7a85",type:"dashed",opacity:.6},label:{color:"#ff7a85",fontSize:10,formatter:"8月输配电价执行新版"},data:[{xAxis:"8"}]}}
+    ]
+  });
+  c.resize();
+  // 动态结论（跟着图表走）
+  const ec=document.getElementById("ov-trend-concl");
+  const i=8, cur=n26[i], prev=n26[7], yoy=n25[i];
+  const pct=(a,b)=>(b==null||a==null||!b)?null:((a-b)/b*100);
+  const pc=pct(cur,prev), yc=pct(cur,yoy);
+  const arrow=v=>v==null?"":(v>=0?'<span class="up">+'+v.toFixed(2)+'% ▲</span>':'<span class="dn">'+v.toFixed(2)+'% ▼</span>');
+  if(cur!=null){
+    ec.innerHTML="2026年9月全国均价 <b>"+fmt(cur,4)+"</b> 元/千瓦时，环比8月 "+arrow(pc)+"，同比2025年9月 "+arrow(yc)+
+      "；省间极差 <b>"+fmt(max26[i]-min26[i],4)+"</b> 元（最高 <b>"+hi26[i]+"</b> "+fmt(max26[i],4)+" · 最低 <b>"+lo26[i]+"</b> "+fmt(min26[i],4)+"）。";
+  }
 }
 
 function drawRank(rankData){
@@ -462,6 +557,12 @@ function drawVol(m){
     rows.push({prov:p,total:total,pri:e["优先发电"]==null?0:e["优先发电"],mkt:e["市场交易"]==null?0:e["市场交易"]});
   }
   rows.sort((a,b)=>b.total-a.total);
+  // 动态结论
+  const ec=document.getElementById("ov-vol-concl");
+  if(rows.length){
+    const tot=rows.reduce((s,r)=>s+r.total,0), priT=rows.reduce((s,r)=>s+r.pri,0);
+    ec.innerHTML=m+" 全国代理购电合计 <b>"+fmtwFull(Math.round(tot))+"</b> 万千瓦时 · 优先发电占 <b>"+(priT/tot*100).toFixed(1)+"%</b> / 市场交易采购占 <b>"+((1-priT/tot)*100).toFixed(1)+"%</b> · 规模最大 <b>"+rows[0].prov+"</b>（占全国 "+(rows[0].total/tot*100).toFixed(1)+"%） · 最小 <b>"+rows[rows.length-1].prov+"</b>。";
+  }
   const top=rows.slice().reverse();               // 全部地区
   el.style.height=Math.max(340, top.length*30+24)+"px";
   const c=echarts.init(el);
@@ -485,10 +586,6 @@ function drawVol(m){
 function renderRegion(force){
   const p=curProv;
   document.getElementById("rg-title").textContent=p+"（"+VOLT_LABEL[curVolt]+"）";
-  const formula=document.getElementById("rg-formula");
-  formula.innerHTML="计算口径：<b class='co'>综合平段电价‑‑电网代购</b> = <code>代理购电价格</code> + <code>上网环节线损电价</code> + <code>电度输配电价</code> + <code>政府性基金及附加</code> + <code>系统运行费折价</code>；"+
-    "<b class='gv'>综合平段电价‑‑入市交易</b> = <code>入市交易购电价格</code> + 上网环节线损电价 + 电度输配电价 + 政府性基金及附加 + 系统运行费折价。"+
-    "（当前电压等级：<b>"+VOLT_LABEL[curVolt]+"</b>，电度输配电价="+fmt(d(p,curVolt,curMonth).dg)+" 元/千瓦时）";
 
   const x7=d(p,curVolt,curMonth);
   const kpis=[
@@ -499,8 +596,21 @@ function renderRegion(force){
   document.getElementById("rg-kpis").innerHTML=kpis.map(k=>'<div class="kpi '+k.c+'"><div class="lab">'+k.lab+'</div><div class="num">'+k.num+'<small>元/千瓦时</small></div><div class="sub">'+k.sub+'</div></div>').join("");
 
   document.getElementById("rg-trend-title").textContent=p+" 月度价格与购电规模走势";
-  drawRegionTrend(p, dataRg(p));
-  drawRegionTable(p, dataRg(p));
+  const fd=dataRg(p);
+  drawRegionTrend(p, fd);
+  // 走势图动态结论
+  const zg=M9.map(mm=>jd(fd[mm].zonghe_dg)), ag=M9.map(mm=>jd(fd[mm].agent));
+  const valid=zg.filter(v=>v!=null);
+  const ec=document.getElementById("rg-trend-concl");
+  if(valid.length){
+    const first=zg[0], last=zg[zg.length-1];
+    const ch=(first!=null&&last!=null)?((last-first)/first*100):null;
+    let hi=-1e9,lo=1e9,him="",lom="";
+    M9.forEach((mm,i)=>{const v=zg[i];if(v==null)return;if(v>hi){hi=v;him=mm;}if(v<lo){lo=v;lom=mm;}});
+    ec.innerHTML="综合平段电价（电网代购）1月 <b>"+fmt(first,4)+"</b> → 9月 <b>"+fmt(last,4)+"</b> 元/千瓦时，累计 "+(ch==null?"—":(ch>=0?'<span class="up">+'+ch.toFixed(2)+"% ▲</span>":'<span class="dn">'+ch.toFixed(2)+"% ▼</span>"))+
+      "；期间最高 <b>"+him+"</b>（"+fmt(hi,4)+"） · 最低 <b>"+lom+"</b>（"+fmt(lo,4)+"）；代理购电价格 1月 "+fmt(ag[0],4)+" → 9月 "+fmt(ag[ag.length-1],4)+"。";
+  }
+  drawRegionTable(p, fd);
 }
 function dataRg(p){
   const months=M9;
@@ -617,11 +727,29 @@ function renderCmp3Chart(){
     series:series
   }, true);
   c3.resize();
+  // 图三 动态结论（2026.9 vs 2025.9 同比）
+  {
+    const ec=document.getElementById("cmp-c3-concl");
+    const rows=cmpSelected.map(p=>{
+      const a25=cp25byVolt(p,"zonghe_dg")[8];
+      const a26=jd(d(p,curVolt,"9月").zonghe_dg);
+      return {p:p,v26:a26,ch:(a25!=null&&a26!=null&&a25)?((a26-a25)/a25*100):null};
+    }).filter(r=>r.v26!=null);
+    if(rows.length){
+      const up=rows.filter(r=>r.ch!=null&&r.ch>=0).sort((a,b)=>b.ch-a.ch);
+      const dn=rows.filter(r=>r.ch!=null&&r.ch<0).sort((a,b)=>a.ch-b.ch);
+      const byV=rows.slice().sort((a,b)=>b.v26-a.v26);
+      ec.innerHTML="2026.9 vs 2025.9 同比："+(up.length?"涨幅最大 <b>"+up[0].p+"</b>（<span class='up'>+"+up[0].ch.toFixed(2)+"%</span>）":"无上涨省份")+
+        (dn.length?" · 降幅最大 <b>"+dn[0].p+"</b>（<span class='dn'>"+dn[0].ch.toFixed(2)+"%</span>）":"")+
+        "；2026年9月最高 <b>"+byV[0].p+"</b>（"+fmt(byV[0].v26,4)+"） · 最低 <b>"+byV[byV.length-1].p+"</b>（"+fmt(byV[byV.length-1].v26,4)+"）。";
+    }
+  }
 }
 
 function renderCompare(){
-  document.getElementById("cmp-volt-tag").textContent="当前电压等级："+VOLT_LABEL[curVolt];
+  document.getElementById("cmp-volt-tag").textContent=VOLT_LABEL[curVolt];
   document.getElementById("cmp-cur-prov").textContent=curProv;
+  document.getElementById("cmp-c2b-title").textContent=curProv;
   const c1=echInit("cmp-c1");
   const c2=echInit("cmp-c2");
 
@@ -644,6 +772,18 @@ function renderCompare(){
     ]
   });
   c1.resize();
+  // 图一 动态结论
+  {
+    const a25=js25.filter(v=>v!=null), a26=js26.filter(v=>v!=null);
+    const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+    const m25=avg(a25), m26=avg(a26);
+    const ch=(m25!=null&&m26!=null&&m25)?((m26-m25)/m25*100):null;
+    let hi=-1e9,him="";js26.forEach((v,i)=>{if(v!=null&&v>hi){hi=v;him=(i+1)+"月";}});
+    let lo=1e9,lom="";js26.forEach((v,i)=>{if(v!=null&&v<lo){lo=v;lom=(i+1)+"月";}});
+    document.getElementById("cmp-c1-concl").innerHTML=
+      curProv+" 2026年1—9月代理购电均价 <b>"+fmt(m26,4)+"</b> 元/千瓦时，较2025全年均价 "+fmt(m25,4)+" "+(ch==null?"—":(ch>=0?'<span class="up">+'+ch.toFixed(2)+"% ▲</span>":'<span class="dn">'+ch.toFixed(2)+"% ▼</span>"))+
+      "；2026年最高 <b>"+him+"</b>（"+fmt(hi,4)+"） · 最低 <b>"+lom+"</b>（"+fmt(lo,4)+"）。";
+  }
 
   // 图二 当前省份 综合平段构成（跨年 2025.1 → 2026.9）
   document.getElementById("cmp-c2-title").textContent=curProv;
@@ -667,6 +807,48 @@ function renderCompare(){
       .concat([{name:"综合平段合计(线)",type:"line",data:zg,smooth:true,lineStyle:{width:2.6,color:"#ffffff"},itemStyle:{color:"#ffffff"},symbol:"none",z:10}])
   });
   c2.resize();
+  // 图二 动态结论
+  {
+    const v25=zg[0], v26=zg[20];
+    const ch=(v25!=null&&v26!=null&&v25)?((v26-v25)/v25*100):null;
+    document.getElementById("cmp-c2-concl").innerHTML=
+      curProv+" 综合平段电价 2025.1 <b>"+fmt(v25,4)+"</b> → 2026.9 <b>"+fmt(v26,4)+"</b> 元/千瓦时，累计 "+(ch==null?"—":(ch>=0?'<span class="up">+'+ch.toFixed(2)+"% ▲</span>":'<span class="dn">'+ch.toFixed(2)+"% ▼</span>"))+
+      "（下方占比图可看是哪一项在推动变化）。";
+  }
+  // 图二·B 构成占比（100% 堆叠面积）+ 动态结论
+  {
+    const cb=echInit("cmp-c2b");
+    const names=["代理购电价格","上网环节线损电价","电度输配电价","政府性基金及附加","系统运行费折价"];
+    const keys=["agent","xiansun","dg","jijin","xitong"];
+    const colors=["#4a9eff","#39c1e0","#8b7cf6","#f5c542","#3fcc7a"];
+    const series=keys.map((k,i)=>{
+      const raw=cp25byVolt(curProv,k).concat(cp26(curProv,k));
+      const pct=raw.map((v,j)=>(v!=null&&zg[j]!=null&&zg[j]!==0)?Number((v/zg[j]*100).toFixed(2)):null);
+      return {name:names[i],type:"line",stack:"share",data:pct,symbol:"none",lineStyle:{width:0},areaStyle:{color:colors[i],opacity:.88},emphasis:{focus:"series"}};
+    });
+    cb.setOption({
+      backgroundColor:"transparent",
+      grid:{left:40,right:16,top:36,bottom:44},
+      tooltip:{trigger:"axis",backgroundColor:"#1d2f47",borderColor:"#2a3d5c",textStyle:{color:"#e8eef7"},
+        formatter:(ps)=>{let h=ps[0].axisValue+"<br>";ps.forEach(p=>{if(p.value==null)return;h+=p.marker+p.seriesName+": <b>"+p.value.toFixed(1)+"%</b><br>";});return h;}},
+      legend:{top:0,textStyle:{color:"#93a7c4",fontSize:11},itemWidth:12,itemHeight:8},
+      xAxis:{type:"category",data:LBL21,boundaryGap:false,axisLabel:{color:"#93a7c4",fontSize:9.5,rotate:45},axisLine:{lineStyle:{color:"#2a3d5c"}}},
+      yAxis:{type:"value",max:100,min:0,axisLabel:{color:"#93a7c4",formatter:"{value}%"},splitLine:{lineStyle:{color:"#2a3d5c"}}},
+      series:series
+    });
+    cb.resize();
+    // 结论：最新月各项占比
+    const parts=keys.map((k,i)=>{
+      const raw=cp25byVolt(curProv,k).concat(cp26(curProv,k));
+      const v=raw[20], z=zg[20];
+      return {name:names[i],pct:(v!=null&&z!=null&&z!==0)?v/z*100:null};
+    }).filter(x=>x.pct!=null).sort((a,b)=>b.pct-a.pct);
+    if(parts.length){
+      document.getElementById("cmp-c2b-concl").innerHTML=
+        curProv+" 2026年9月构成： "+parts.map(x=>x.name+" <b>"+x.pct.toFixed(1)+"%</b>").join(" · ")+
+        "；最大项为 <b>"+parts[0].name+"</b>。";
+    }
+  }
 
   // 图三 多省跨年对比（省份可多选）
   buildCmp3Multi();
@@ -704,22 +886,16 @@ function renderRussi(){
     }
   });
   saveList.sort((a,b)=>a[1]-b[1]);overList.sort((a,b)=>b[1]-a[1]);
+  document.getElementById("rus-volt-tag").textContent=VOLT_LABEL[curVolt];
 
-  const note=document.getElementById("rus-note");
-  note.innerHTML="本板块基于《分表5-2026入市购电价格》——即 <b>世纪互联与售电公司签订的固定入市购电价格</b>，与各省「电网代购」综合平段电价做对比，评估<b class='gv'>签约是否划算</b>。"+
-    "<br>涉及省份："+RUS_PROVS.join("、")+"（共<b>"+RUS_PROVS.length+"省</b>）。"+
-    "当前统计：<b class='co'>"+Y+"年"+M+"</b>，该年该月可比较省份 <b>"+dcmp.length+"</b> 个。"+
-    "其中 <b class='gv'>"+save+" 省入市更省</b>，<b class='rv'>"+over+" 省入市更贵</b>。"+
-    (saveList.length?"<br>最大节省：<b class='gv'>"+saveList[0][0]+"（"+fmt(saveList[0][1])+" 元/千瓦时）</b>":"")+
-    (overList.length?"<br>最大超支：<b class='rv'>"+overList[0][0]+"（+"+fmt(overList[0][1])+"）</b>":"")+"。"+
-    "<br><b class='co'>判定标准</b>：入市综合平段电价 − 电网代购综合平段电价 ＜0 表示入市更（省）划算。"+
-    (Y==="2025"?"<br><b class='rv'>数据提示</b>：2025 年仅有北京、冀北公布入市交易价格，其余 6 省无可比数据。":"")+
-    "<br>当前电压等级：<b>"+VOLT_LABEL[curVolt]+"</b>";
-
-  const formula=document.getElementById("rus-formula");
-  formula.innerHTML="<b class='co'>综合平段电价‑‑入市交易</b> = <code>入市交易购电价格(签约价)</code> + 上网环节线损电价 + 电度输配电价 + 政府性基金及附加 + 系统运行费折价；"+
-    "<b class='rv'>综合平段电价‑‑电网代购</b> = <code>代理购电价格</code> + 同上四项。"+
-    "两者仅「购电价」一项不同，故差价 ≈ <b>签约入市价 − 代理购电价格</b>。（当前统计：<b class='co'>"+Y+"年"+M+"</b>）";
+  // 对比图动态结论（原大段说明改为一行跟着图表走）
+  {
+    const ec=document.getElementById("rus-chart-concl");
+    const avgDf=dcmp.length?dcmp.reduce((s,x)=>s+(x.data.zonghe_rus-x.data.zonghe_dg),0)/dcmp.length:null;
+    ec.innerHTML=Y+"年"+M+" 可比较 <b>"+dcmp.length+"</b> 省 · <b class='gv'>"+save+" 省入市更省</b> / <b class='rv'>"+over+" 省更贵</b> · 平均差值 <b>"+fmt(avgDf,4)+"</b> 元/千瓦时"+
+      (saveList.length?" · 最大节省 <b class='gv'>"+saveList[0][0]+"（"+fmt(saveList[0][1])+"）</b>":"")+
+      (overList.length?" · 最大超支 <b class='rv'>"+overList[0][0]+"（+"+fmt(overList[0][1])+"）</b>":"")+"。";
+  }
 
   const signedAvg=dcmp.length?dcmp.reduce((s,x)=>s+(x.data.signed||0),0)/dcmp.length:null;
   const kpis=[
@@ -767,7 +943,47 @@ function renderRussi(){
   });
   document.getElementById("rus-table").innerHTML=h;
 
+  drawRusDiff();
   renderRussiTrend();
+}
+
+// 差值月度多省曲线：2026年1—9月 每个签约省 入市−代购 的差值走势
+function drawRusDiff(){
+  const c=echInit("rus-diff");
+  const provs=RUS_PROVS.filter(p=>M9.some(m=>{const x=d(p,curVolt,m);return x&&x.zonghe_rus!=null;}));
+  const series=provs.map((p,i)=>({
+    name:p,type:"line",
+    data:M9.map(m=>{const x=d(p,curVolt,m);return (x&&x.zonghe_rus!=null&&x.zonghe_dg!=null)?Number((x.zonghe_rus-x.zonghe_dg).toFixed(4)):null;}),
+    connectNulls:true,symbol:"circle",symbolSize:5,smooth:true,
+    lineStyle:{width:2.2,color:PAL[i%PAL.length]},itemStyle:{color:PAL[i%PAL.length]}
+  }));
+  if(series.length){
+    series[0].markLine={silent:true,symbol:"none",lineStyle:{color:"#93a7c4",type:"dashed"},label:{color:"#93a7c4",fontSize:10,position:"insideEndTop"},
+      data:[{yAxis:0,label:{formatter:"0线：上方=入市更贵 · 下方=入市更省"}}]};
+  }
+  c.setOption({
+    backgroundColor:"transparent",
+    grid:{left:40,right:30,top:40,bottom:26},
+    tooltip:{trigger:"axis",backgroundColor:"#1d2f47",borderColor:"#2a3d5c",textStyle:{color:"#e8eef7"},
+      formatter:(ps)=>{let h=ps[0].axisValue+"<br>";ps.forEach(p=>{if(p.value==null)return;h+=p.marker+p.seriesName+": <b>"+(p.value>0?"+":"")+p.value.toFixed(4)+"</b>";});return h;}},
+    legend:{top:0,textStyle:{color:"#93a7c4",fontSize:11.5},type:"scroll"},
+    xAxis:{type:"category",data:M9.map(m=>m.replace("月","")),axisLabel:{color:"#93a7c4",fontSize:10.5},axisLine:{lineStyle:{color:"#2a3d5c"}}},
+    yAxis:{type:"value",name:"元/千瓦时",nameTextStyle:{color:"#93a7c4"},axisLabel:{color:"#93a7c4"},splitLine:{lineStyle:{color:"#2a3d5c"}}},
+    series:series
+  }, true);
+  c.resize();
+  // 动态结论
+  const ec=document.getElementById("rus-diff-concl");
+  if(provs.length){
+    const last=provs.map(p=>{const x=d(p,curVolt,"9月");return {p:p,df:(x&&x.zonghe_rus!=null&&x.zonghe_dg!=null)?x.zonghe_rus-x.zonghe_dg:null};}).filter(r=>r.df!=null);
+    const neg=last.filter(r=>r.df<0).sort((a,b)=>a.df-b.df);
+    const pos=last.filter(r=>r.df>=0).sort((a,b)=>b.df-a.df);
+    ec.innerHTML="2026年9月： "+(neg.length?"<b class='gv'>"+neg.length+" 省入市更省</b>（最省 <b>"+neg[0].p+" "+fmt(neg[0].df)+"</b>）":"无省份入市更省")+
+      (pos.length?" · <b class='rv'>"+pos.length+" 省更贵</b>（最贵 <b>"+pos[0].p+" +"+fmt(pos[0].df)+"</b>）":"")+
+      "；曲线自年初以来的走向可直接看出各省签约优势是扩大还是收窄。";
+  }else{
+    ec.innerHTML="当前电压等级下暂无入市差值数据。";
+  }
 }
 
 // 跨年趋势图：某省 2025(全年12月) vs 2026(1—9月) 的电网代购/入市综合平段 同比
@@ -797,6 +1013,20 @@ function renderRussiTrend(){
     ]
   });
   c.resize();
+  // 动态结论
+  {
+    const ec=document.getElementById("rus-trend-concl");
+    const dgl=dg26[8], rusl=rus26arr[8];
+    const avg=a=>{const v=a.filter(x=>x!=null);return v.length?v.reduce((s,x)=>s+x,0)/v.length:null;};
+    const a25d=avg(dg25), a26d=avg(dg26), a26r=avg(rus26arr);
+    if(dgl!=null&&rusl!=null){
+      const df=rusl-dgl;
+      ec.innerHTML=p+" 2026年9月：入市 "+fmt(rusl,4)+" vs 代购 "+fmt(dgl,4)+"，差值 <b>"+(df<0?"<span class='dn'>"+fmt(df,4)+"（入市更省）</span>":"<span class='up'>+"+fmt(df,4)+"（入市更贵）</span>")+"</b>"+
+        "；2026年1—9月均价：入市 <b>"+fmt(a26r,4)+"</b> vs 代购 <b>"+fmt(a26d,4)+"</b>（2025年代购均价 "+fmt(a25d,4)+"）。";
+    }else{
+      ec.innerHTML=p+" 2026年9月入市数据缺失，详见曲线；2026年1—9月代购均价 <b>"+fmt(a26d,4)+"</b>（2025年 "+fmt(a25d,4)+"）。";
+    }
+  }
 }
 
 // 入市签约对比 筛选条：统计年份 / 统计月份 / 趋势省份
@@ -835,7 +1065,7 @@ function injectOverviewFilter(){
     '<div class="fgroup"><label>规模月份</label><select id="ovVolMonth">'+["7月","8月","9月"].map(m=>'<option value="'+m+'">'+m+'</option>').join("")+'</select></div>'+
     '<div class="switchhint" style="margin-left:auto">切换月份 / 指标，图表与KPI同步联动（左栏省份数值随概览月份变化）</div>';
   const head=document.getElementById("view-overview");
-  head.insertBefore(fbar, head.children[2]);
+  head.insertBefore(fbar, head.children[1]);
   document.getElementById("ovMonth").addEventListener("change",e=>{curMonth=e.target.value;buildSidebar();renderOverview();});
   document.getElementById("ovKey").addEventListener("change",e=>{curRankKey=e.target.value;renderOverview();});
   document.getElementById("ovVolMonth").addEventListener("change",e=>{curVolMonth=e.target.value;renderOverview();});
@@ -875,7 +1105,7 @@ function renderAll(force){
   setTimeout(()=>{ rescaleAll(); },120);
 }
 function rescaleAll(){
-  ["ov-rank","ov-vol","rg-trend","cmp-c1","cmp-c2","cmp-c3","rus-chart","rus-trend"].forEach(id=>{
+  ["ov-trend","ov-rank","ov-vol","rg-trend","cmp-c1","cmp-c2","cmp-c2b","cmp-c3","rus-chart","rus-diff","rus-trend"].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
     const c=echarts.getInstanceByDom(el); if(c) c.resize();
   });
