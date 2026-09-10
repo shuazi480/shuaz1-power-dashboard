@@ -122,6 +122,9 @@ select:focus{border-color:var(--accent)}
 .card h2{font-size:15.5px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:9px}
 .card h2 .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
 .card .sub{font-size:12px;color:var(--txt2);margin-bottom:14px}
+.card h2 .dlbtn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt2);font-size:12px;font-weight:600;padding:5px 12px;border-radius:8px;cursor:pointer;transition:.18s;font-family:inherit;line-height:1;white-space:nowrap}
+.card h2 .dlbtn:hover{color:#fff;border-color:var(--accent);background:rgba(74,158,255,.14)}
+.card h2 .dlbtn:active{transform:translateY(1px)}
 .chart{width:100%;height:340px}
 .chart.tall{height:400px}
 .chart.short{height:300px}
@@ -257,8 +260,8 @@ details.kd .kd-body code{color:var(--txt);background:var(--panel2);padding:1px 6
         <div class="concl" id="rg-trend-concl"></div>
       </div>
       <div class="card">
-        <h2><span class="dot"></span>月度价格构成明细</h2>
-        <div class="sub">单位：元/千瓦时 · 已按 综合平段电价 = 五项之和 校验</div>
+        <h2><span class="dot"></span>月度价格构成明细<button class="dlbtn" type="button" onclick="downloadRegionTable()">⬇ 下载数据</button></h2>
+        <div class="sub">单位：元/千瓦时</div>
         <div class="tbl-scroll"><table class="grid" id="rg-table"></table></div>
       </div>
     </div>
@@ -654,6 +657,26 @@ function drawRegionTable(p, fd){
   document.getElementById("rg-table").innerHTML=h;
 }
 function jd(x){ return (x==null||x===undefined||isNaN(x))?null:Number(x); }
+function downloadRegionTable(){
+  const p=curProv, fd=dataRg(p);
+  const rows=[["代理购电价格","agent"],["上网环节线损电价","xiansun"],["电度输配电价","dg"],["政府性基金及附加","jijin"],["系统运行费折价","xitong"],["综合平段电价‑‑电网代购","zonghe_dg"],["入市交易购电价格","rus"],["综合平段电价‑‑入市交易","zonghe_rus"]];
+  const esc=v=>{const s=(v==null?"":String(v));return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  const val=v=>{const n=jd(v);return n==null?"":n.toFixed(4);};
+  const L=[];
+  L.push(esc(p+" 月度价格构成明细"));
+  L.push([esc("电压等级："+VOLT_LABEL[curVolt]),esc("单位：元/千瓦时"),esc("导出时间："+new Date().toLocaleString("zh-CN"))].join(","));
+  L.push("");
+  L.push(["项目"].concat(M9).map(esc).join(","));
+  rows.forEach(r=>{L.push([r[0]].concat(M9.map(m=>val(fd[m][r[1]]))).map(esc).join(","));});
+  const csv="\ufeff"+L.join("\r\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  const d0=new Date(), pad=n=>String(n).padStart(2,"0");
+  a.href=url; a.download=p+"_月度价格构成明细_"+d0.getFullYear()+pad(d0.getMonth()+1)+pad(d0.getDate())+".csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
 
 /* ============ 三图对比 ============ */
 // 跨年21个月标签: 25-01..25-12, 26-01..26-09
