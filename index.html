@@ -427,7 +427,7 @@ function buildSidebar(){
   const _n=ORDPROVS.length;
   const _sub=Object.keys(SUB_PARENT).filter(p=>ORDPROVS.includes(p)).length;
   let h='<h3>省份电价 <span class="tag">'+_n+' 地区</span></h3>';
-  if(_sub) h+='<div style="padding:0 8px 6px;font-size:11.5px;color:#6f829d;line-height:1.5">含广东 <b style="color:#93a7c4">'+_sub+'</b> 个省内价区。全国概览按 <b style="color:#93a7c4">'+NATPROVS.length+'</b> 个省级单元统计，价区不计入；要比较价区输配电价差异请看「趋势对比」</div>';
+  if(_sub) h+='<div style="padding:0 8px 6px;font-size:11.5px;color:#6f829d;line-height:1.5">含广东 <b style="color:#93a7c4">'+_sub+'</b> 个省内价区 · 全国均价按 <b style="color:#93a7c4">'+NATPROVS.length+'</b> 个省级单元计；价区在「综合平段电价排序」与「趋势对比」单独呈现</div>';
   h+='<div style="padding:2px 8px 8px;border-bottom:1px solid #2a3d5c;margin-bottom:8px">';
   h+='<input id="provSearch" placeholder="🔍 搜索省份…" style="width:100%;background:#1d2f47;border:1px solid #2a3d5c;color:#e8eef7;border-radius:8px;padding:8px 10px;font-size:12.5px;outline:none"></div>';
   let lastRegion=null;
@@ -455,10 +455,13 @@ function renderOverview(){
   const isRus=curRankKey==="综合平段电价--入市交易";
   const key=curRankKey==="代理购电价格"?"agent":(isRus?"zonghe_rus":"zonghe_dg");
   const lab=rankLabel();
-  // 收集各省该月该指标（无数字的省份不展示）
-  // 全国口径只取省级单元：广东 4 个价区不参与（共价=广东，代理购电价完全相同，计入只会重复出现 4 条一样的柱）
+  // 综合平段电价是唯一能体现广东价区差异的指标（共价与广东一致，差额全部来自输配电价）→ 排序纳入价区；
+  // 代理购电价格等共价指标下价区与广东完全相同，纳入只会重复 4 条一样的柱 → 只统计省级单元。
+  const incSub=(curRankKey==="综合平段电价--电网代购"||curRankKey==="综合平段电价--入市交易");
+  const LIST=incSub?ORDPROVS:NATPROVS;
+  // 收集各地区该月该指标（无数字的不展示）
   let vals=[];
-  for(const p of NATPROVS){
+  for(const p of LIST){
     const x=d(p,curVolt,m);
     const v=x[key];
     if(v==null||v===undefined) continue;
@@ -469,35 +472,42 @@ function renderOverview(){
   const max=n>0?vals[0][1]:null, min=n>0?vals[n-1][1]:null;
   const arr=vals.map(v=>v[1]).sort((a,b)=>a-b);
   const median=arr.length?(arr.length%2?arr[(arr.length-1)/2]:(arr[arr.length/2-1]+arr[arr.length/2])/2):null;
-  const avg=arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
-  const nP=n;
+  // 全国平均值恒按省级单元计：价区与广东共价，纳入会把广东重复加权
+  const arrP=vals.filter(v=>!SUB_PARENT[v[0]]).map(v=>v[1]);
+  const avg=arrP.length?arrP.reduce((a,b)=>a+b,0)/arrP.length:null;
+  const nP=arrP.length;
+  const u=incSub?"个地区":"个省级单元";
   const diff=(max!=null&&min!=null)?max-min:null;
 
   // 口径说明已精简：移入各图卡标题 ⓘ 悬浮提示与动态结论行
 
   const kpis=[
     {lab:"最高价格",num:fmt(max),c:"c-red",sub:lab+" · 最高",icon:"▲"},
-    {lab:"价格中位数",num:fmt(median),c:"c-blue",sub:"半数省份低于此价",icon:"◆"},
+    {lab:"价格中位数",num:fmt(median),c:"c-blue",sub:(incSub?"半数地区":"半数省份")+"低于此价",icon:"◆"},
     {lab:"最低价格",num:fmt(min),c:"c-green",sub:lab+" · 最低",icon:"▼"},
-    {lab:"最高最低差",num:fmt(diff),c:"c-yellow",sub:"极差 "+n+" 省",icon:"⇕"},
+    {lab:"最高最低差",num:fmt(diff),c:"c-yellow",sub:"极差 "+n+" "+(incSub?"地区":"省"),icon:"⇕"},
   ];
-  if(curRankKey!=="代理购电价格") kpis.push({lab:"平均值",num:fmt(avg),c:"c-cyan",sub:nP+" 省简单平均",icon:"∑"});
+  if(curRankKey!=="代理购电价格") kpis.push({lab:"平均值",num:fmt(avg),c:"c-cyan",sub:nP+" 省简单平均（价区不重复计）",icon:"∑"});
   document.getElementById("ov-kpis").innerHTML=kpis.map(k=>'<div class="kpi '+k.c+'"><div class="lab">'+k.icon+' '+k.lab+'</div><div class="num">'+k.num+'<small>元/千瓦时</small></div><div class="sub">'+k.sub+'</div></div>').join("");
 
   document.getElementById("ov-title").textContent="2026年"+m+" "+lab;
-  { // 汇总口径：全国统计按省级单元，价区仅在地区详情 / 趋势对比中单独查看
-    const subN=Object.keys(SUB_PARENT).filter(p=>ORDPROVS.includes(p)).length;
+  { // 汇总口径：综合平段电价下纳入广东价区（差额=输配电价）；其余指标只算省级单元
+    const subN=vals.filter(v=>SUB_PARENT[v[0]]).length;
     const el=document.getElementById("ov-scope");
-    if(el) el.textContent="汇总口径："+NATPROVS.length+" 个省级单元"+(subN?"（广东 "+subN+" 个省内价区不重复计入，详见「趋势对比」）":"");
+    if(el) el.textContent="排序口径："+n+" "+u+(subN?"（"+nP+" 省 + 广东 "+subN+" 个省内价区）":"")+
+      " · 全国均价恒按 "+NATPROVS.length+" 个省级单元计";
   }
   document.getElementById("ov-rank-title").textContent="2026年"+m+" "+lab+"排序";
-  document.getElementById("ov-rank-sub").textContent="单位：元/千瓦时 · "+VOLT_LABEL[curVolt]+" · 按价格从高到低";
+  document.getElementById("ov-rank-sub").textContent="单位：元/千瓦时 · "+VOLT_LABEL[curVolt]+" · 按价格从高到低"+
+    (vals.some(v=>SUB_PARENT[v[0]])?" · 金色 = 广东省内价区":"");
   drawOvTrend();
   drawRank(vals);
   // 排序图动态结论
   const rc=document.getElementById("ov-rank-concl");
   if(vals.length){
-    rc.innerHTML="汇总 <b>"+vals.length+"</b> 个省级单元 · 最高 <b>"+vals[0][0]+" "+fmt(vals[0][1])+"</b> · 最低 <b>"+vals[vals.length-1][0]+" "+fmt(vals[vals.length-1][1])+"</b> · 极差 <b>"+fmt(diff)+"</b> 元/千瓦时 · 前三："+vals.slice(0,3).map(v=>v[0]).join("、")+"。";
+    const subHit=vals.filter(v=>SUB_PARENT[v[0]]).map(v=>v[0]);
+    rc.innerHTML="汇总 <b>"+vals.length+"</b> "+u+" · 最高 <b>"+vals[0][0]+" "+fmt(vals[0][1])+"</b> · 最低 <b>"+vals[vals.length-1][0]+" "+fmt(vals[vals.length-1][1])+"</b> · 极差 <b>"+fmt(diff)+"</b> 元/千瓦时 · 前三："+vals.slice(0,3).map(v=>v[0]).join("、")+"。"+
+      (subHit.length?" 含广东 "+subHit.length+" 个价区（共价与广东一致，差额=输配电价）。":"");
   }
   document.getElementById("ov-vol-title").textContent="2026年"+curVolMonth+" 代理购电规模排序";
   document.getElementById("ov-vol-sub").textContent="单位：万千瓦时 · 优先发电（绿） / 市场交易采购（蓝）";
@@ -550,21 +560,33 @@ function drawOvTrend(){
   }
 }
 
+// 排序图纵轴标签：广东价区太长会顶出画布，压缩成「广东·珠三角6市」；完整名放进 tooltip
+function rankShort(p){
+  if(!SUB_PARENT[p]) return p;
+  return "广东·"+p.replace(/^广东\s*[(（]/,"").replace(/[)）]\s*$/,"").replace(/\s+/g,"");
+}
 function drawRank(rankData){
   const el=document.getElementById("ov-rank");
   const top=rankData.slice().reverse();           // 全部地区，价格从高到低
   el.style.height=Math.max(340, top.length*30+24)+"px";  // 高度随地区数自适应
   const c=echInit("ov-rank");
-  const names=top.map(x=>x[0]);
-  const vals=top.map(x=>Number(x[1]).toFixed(4));
+  const names=top.map(x=>rankShort(x[0]));
+  const BLUE=new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:"#2f6fd0"},{offset:1,color:"#5fb0ff"}]);
+  const GOLD=new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:"#a8661a"},{offset:1,color:"#f0b544"}]);
+  // 广东 4 个省内价区用金色柱区分：它们与广东共价，价差全部来自输配电价
+  const vals=top.map(x=>({value:Number(x[1]).toFixed(4), fullName:x[0],
+    itemStyle:{borderRadius:[0,7,7,0],color:SUB_PARENT[x[0]]?GOLD:BLUE}}));
+  const maxLen=names.reduce((a,b)=>Math.max(a,String(b).length),0);
   c.setOption({
     backgroundColor:"transparent",
-    grid:{left:66,right:50,top:14,bottom:14},
+    grid:{left:Math.max(66, Math.min(132, maxLen*13+16)),right:50,top:14,bottom:14},
     tooltip:{trigger:"axis",axisPointer:{type:"shadow"},backgroundColor:"#1d2f47",borderColor:"#2a3d5c",textStyle:{color:"#e8eef7"},
-      formatter:(ps)=>ps[0].name+"<br><b style='color:#5fb0ff'>"+Number(ps[0].value).toFixed(4)+"</b> 元/千瓦时"},
+      formatter:(ps)=>((ps[0].data&&ps[0].data.fullName)||ps[0].name)+"<br><b style='color:#5fb0ff'>"+Number(ps[0].value).toFixed(4)+"</b> 元/千瓦时"},
     xAxis:{type:"value",axisLabel:{color:"#93a7c4",formatter:()=>""},splitLine:{lineStyle:{color:"#2a3d5c"}},axisLine:{show:false}},
-    yAxis:{type:"category",data:names,axisLabel:{color:"#e8eef7",fontSize:12},axisLine:{lineStyle:{color:"#2a3d5c"}},axisTick:{show:false}},
-    series:[{type:"bar",data:vals,barWidth:"58%",itemStyle:{borderRadius:[0,7,7,0],color:new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:"#2f6fd0"},{offset:1,color:"#5fb0ff"}])},
+    yAxis:{type:"category",data:names,axisLabel:{color:"#e8eef7",fontSize:12,
+      formatter:(v,i)=>SUB_PARENT[top[i][0]]?"{g|"+v+"}":v,
+      rich:{g:{color:"#f0b544",fontSize:12}}},axisLine:{lineStyle:{color:"#2a3d5c"}},axisTick:{show:false}},
+    series:[{type:"bar",data:vals,barWidth:"58%",
       label:{show:true,position:"right",color:"#93a7c4",fontSize:11,formatter:p=>Number(p.value).toFixed(4)}}]
   });
   c.resize();
