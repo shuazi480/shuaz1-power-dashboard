@@ -161,6 +161,7 @@ table.grid tr:hover td{background:rgba(74,158,255,.06)}
 .concl b{color:var(--txt);font-weight:600}
 .concl .up{color:#ff7a85;font-weight:600}
 .concl .dn{color:#4cd98a;font-weight:600}
+.concl .cl2{display:block;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(120,170,240,.3)}
 /* 标题行 ⓘ 悬浮口径提示 */
 .tipwrap{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--txt2);font-size:10px;font-weight:600;cursor:help;position:relative;margin-left:4px;vertical-align:1px;flex:none}
 .tipwrap:hover{color:var(--cyan);border-color:var(--accent)}
@@ -670,16 +671,22 @@ function renderRegion(force){
   const fd=dataRg(p);
   drawRegionTrend(p, fd);
   // 走势图动态结论
-  const zg=M9.map(mm=>jd(fd[mm].zonghe_dg)), ag=M9.map(mm=>jd(fd[mm].agent));
+  const zg=M9.map(mm=>jd(fd[mm].zonghe_dg)), ag=M9.map(mm=>jd(fd[mm].agent)), rl=M9.map(mm=>jd(fd[mm].zonghe_rus));
   const valid=zg.filter(v=>v!=null);
+  // 1—9 月算术平均（跳过缺失月份）
+  const avg=a=>{const t=a.filter(v=>v!=null); return t.length? t.reduce((s,v)=>s+v,0)/t.length : null;};
+  const mTag=n=> (n===M9.length)? (String(M9[0]).replace("月","")+"—"+String(M9[M9.length-1])) : ("共"+n+"个月");
   const ec=document.getElementById("rg-trend-concl");
   if(valid.length){
     const first=zg[0], last=zg[zg.length-1];
     const ch=(first!=null&&last!=null)?((last-first)/first*100):null;
     let hi=-1e9,lo=1e9,him="",lom="";
     M9.forEach((mm,i)=>{const v=zg[i];if(v==null)return;if(v>hi){hi=v;him=mm;}if(v<lo){lo=v;lom=mm;}});
+    let at=mTag(valid.length)+"算术平均：代理购电价格 <b>"+fmt(avg(ag),4)+"</b> 元/千瓦时 · 综合平段电价（电网代购）<b>"+fmt(avg(zg),4)+"</b> 元/千瓦时";
+    if(avg(rl)!=null) at+=" · 综合平段电价（入市交易）<b>"+fmt(avg(rl),4)+"</b> 元/千瓦时";
     ec.innerHTML="综合平段电价（电网代购）1月 <b>"+fmt(first,4)+"</b> → 9月 <b>"+fmt(last,4)+"</b> 元/千瓦时，累计 "+(ch==null?"—":(ch>=0?'<span class="up">+'+ch.toFixed(2)+"% ▲</span>":'<span class="dn">'+ch.toFixed(2)+"% ▼</span>"))+
-      "；期间最高 <b>"+him+"</b>（"+fmt(hi,4)+"） · 最低 <b>"+lom+"</b>（"+fmt(lo,4)+"）；代理购电价格 1月 "+fmt(ag[0],4)+" → 9月 "+fmt(ag[ag.length-1],4)+"。";
+      "；期间最高 <b>"+him+"</b>（"+fmt(hi,4)+"） · 最低 <b>"+lom+"</b>（"+fmt(lo,4)+"）；代理购电价格 1月 "+fmt(ag[0],4)+" → 9月 "+fmt(ag[ag.length-1],4)+"。"+
+      '<span class="cl2">'+at+"</span>";
   }
   drawRegionTable(p, fd);
 }
