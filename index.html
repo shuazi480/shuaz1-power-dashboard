@@ -85,7 +85,13 @@ a{color:var(--accent);text-decoration:none}
 .sidebar h3{font-size:12px;color:var(--txt2);letter-spacing:1px;margin:14px 8px 8px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
 .sidebar h3:first-child{margin-top:0}
 .sidebar h3 .tag{background:var(--accent2);color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;font-weight:500}
-.region-tag{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--txt2);padding:8px 10px 4px;font-weight:600;letter-spacing:.5px}
+.region-tag{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--txt2);padding:8px 10px 4px;font-weight:600;letter-spacing:.5px;cursor:pointer;user-select:none;border-radius:6px;transition:.15s}
+/* 2026-09-21 分组头可折叠：倒三角 + 点击收起该组 */
+.region-tag:hover{color:var(--txt)}
+.region-tag .nm{display:flex;align-items:center}
+.region-tag .caret{position:relative;flex:0 0 10px;height:10px;margin-right:5px}
+.region-tag .caret::before{content:"";position:absolute;left:2px;top:2px;width:0;height:0;border-left:4.5px solid transparent;border-right:4.5px solid transparent;border-top:6px solid #a9bed9;transition:transform .18s;transform-origin:4.5px 3px}
+.region-tag.col .caret::before{transform:rotate(-90deg)}
 .region-tag .rc{font-weight:400;color:#6f829d;letter-spacing:0}
 .gseg{display:flex;gap:3px;background:#16243a;border:1px solid var(--line);border-radius:9px;padding:3px}
 .gseg button{flex:1;background:transparent;border:none;color:var(--txt2);font-size:12px;padding:5px 4px;border-radius:7px;cursor:pointer;transition:.15s;font-family:inherit}
@@ -96,6 +102,14 @@ a{color:var(--accent);text-decoration:none}
 .pbtn.on{background:linear-gradient(90deg,var(--accent2),transparent);color:#fff;font-weight:600}
 .pbtn .v{font-size:11.5px;color:var(--txt2);font-variant-numeric:tabular-nums}
 .pbtn.on .v{color:var(--cyan)}
+/* 2026-09-21 省份行折叠箭头 + 价区子行缩进（广东下面挂 4 个价区） */
+.pbtn .pname{display:flex;align-items:center}
+.pbtn .pcaret{position:relative;flex:0 0 12px;height:10px;margin-right:4px;font-style:normal}
+.pbtn .pcaret::before{content:"";position:absolute;left:2px;top:2px;width:0;height:0;border-left:4.5px solid transparent;border-right:4.5px solid transparent;border-top:6px solid #9fb5d2;transition:transform .18s;transform-origin:4.5px 3px}
+.pbtn .pcaret.col::before{transform:rotate(-90deg)}
+.pbtn .pcaret.ghost{visibility:hidden;pointer-events:none}
+.pbtn.sub{font-size:12.5px;color:#8ea3c1;padding-left:26px;position:relative}
+.pbtn.sub::before{content:"";position:absolute;left:15px;top:1px;bottom:1px;width:1px;background:#2a3d5c;opacity:.9}
 .main{flex:1;padding:22px 26px 60px}
 .view{display:none}
 .view.on{display:block}
@@ -419,6 +433,40 @@ function groupDefs(){      // 返回 [[组名,[地区...]], ...]，只保留实�
   return src.map(g=>[g[0],g[1].filter(p=>ORDPROVS.indexOf(p)>=0)]);
 }
 function setGroupMode(m){ curGroupMode=m; buildSidebar(); }
+
+/* ==== 2026-09-21 侧边栏折叠：组（大区/电网属性）一层 + 广东价区一层 ==== */
+const gCollapsed=new Set();   // 键：curGroupMode+"|"+组名
+const sCollapsed=new Set();   // 键：父省名（广东）
+function gIsCol(g){ return gCollapsed.has(curGroupMode+"|"+g); }
+function sIsCol(p){ return sCollapsed.has(p); }
+function toggleGroupCol(g){ const k=curGroupMode+"|"+g; if(gCollapsed.has(k)) gCollapsed.delete(k); else gCollapsed.add(k); buildSidebar(); }
+function toggleSubCol(p){ if(sCollapsed.has(p)) sCollapsed.delete(p); else sCollapsed.add(p); buildSidebar(); }
+/* 折叠显隐 + 搜索过滤统一入口（搜索时忽略折叠，命中即展开显示） */
+function syncSidebarView(){
+  const sb=document.getElementById("sidebar"); if(!sb) return;
+  const inp=document.getElementById("provSearch");
+  const q=(inp&&inp.value?inp.value:"").trim(), searching=q.length>0;
+  const all=[].slice.call(sb.querySelectorAll(".pbtn"));
+  const kidsHit=p=>all.some(x=>x.dataset.parent===p&&x.dataset.name.indexOf(q)>=0);
+  all.forEach(b=>{
+    let vis;
+    if(searching) vis=b.dataset.name.indexOf(q)>=0||(!b.dataset.parent&&kidsHit(b.dataset.p));
+    else vis=!gIsCol(b.dataset.g)&&!(b.dataset.parent&&sIsCol(b.dataset.parent));
+    b.style.display=vis?"flex":"none";
+    const c=b.querySelector(".pcaret:not(.ghost)");
+    if(c) c.classList.toggle("col",searching?(kidsHit(b.dataset.p)?false:sIsCol(b.dataset.p)):sIsCol(b.dataset.p));
+  });
+  sb.querySelectorAll(".region-tag").forEach(t=>{
+    let show=true;
+    if(searching){
+      show=false;
+      let n=t.nextElementSibling;
+      while(n&&n.classList.contains("pbtn")){ if(n.style.display!=="none"){ show=true; break; } n=n.nextElementSibling; }
+    }
+    t.style.display=show?"flex":"none";
+    t.classList.toggle("col",searching?false:gIsCol(t.dataset.g));
+  });
+}
 function buildSidebar(){
   const sb=document.getElementById("sidebar");
   const _n=ORDPROVS.length;
@@ -428,32 +476,34 @@ function buildSidebar(){
   h+='<div style="padding:2px 8px 8px;border-bottom:1px solid #2a3d5c;margin-bottom:8px">';
   h+='<div class="gseg" title="切换省市划分方式"><button class="'+(curGroupMode==="geo"?"on":"")+'" data-gm="geo">地理大区</button><button class="'+(curGroupMode==="grid"?"on":"")+'" data-gm="grid">电网属性</button></div>';
   h+='<input id="provSearch" placeholder="🔍 搜索省份…" style="width:100%;background:#1d2f47;border:1px solid #2a3d5c;color:#e8eef7;border-radius:8px;padding:8px 10px;font-size:12.5px;outline:none;margin-top:6px"></div>';
+  const SUBS={};                               // 价区 → 父省（广东）
+  for(const k in SUB_PARENT){ (SUBS[SUB_PARENT[k]]=SUBS[SUB_PARENT[k]]||[]).push(k); }
   for(const gp of groupDefs()){
     if(!gp[1].length) continue;
-    h+='<div class="region-tag"><span>'+gp[0]+'</span><span class="rc">'+gp[1].length+'</span></div>';
+    h+='<div class="region-tag'+(gIsCol(gp[0])?" col":"")+'" data-g="'+gp[0]+'"><span class="nm"><i class="caret"></i>'+gp[0]+'</span><span class="rc">'+gp[1].length+'</span></div>';
     for(const p of gp[1]){
-      const v=d(p,curVolt,curMonth);
-      h+='<button class="pbtn'+(p===curProv?" on":"")+'" data-p="'+p+'" data-name="'+p+'">';
-      h+='<span>'+p+'</span><span class="v">'+fmt(v.zonghe_dg)+'</span></button>';
+      if(SUB_PARENT[p]&&gp[1].indexOf(SUB_PARENT[p])>=0) continue;   // 价区统一挂在父省之下渲染
+      const kids=(SUBS[p]||[]).filter(k=>ORDPROVS.indexOf(k)>=0);
+      const v=d(p,curVolt,curMonth), sc=sIsCol(p);
+      h+='<button class="pbtn'+(p===curProv?" on":"")+'" data-p="'+p+'" data-name="'+p+'" data-g="'+gp[0]+'">';
+      h+='<span class="pname"><i class="pcaret'+(kids.length?(sc?" col":""):" ghost")+'"></i>'+p+'</span><span class="v">'+fmt(v.zonghe_dg)+'</span></button>';
+      for(const k of kids){
+        const kd=d(k,curVolt,curMonth);
+        h+='<button class="pbtn sub'+(k===curProv?" on":"")+'" data-p="'+k+'" data-name="'+k+'" data-g="'+gp[0]+'" data-parent="'+p+'">';
+        h+='<span class="pname"><i class="pcaret ghost"></i>'+k+'</span><span class="v">'+fmt(kd.zonghe_dg)+'</span></button>';
+      }
     }
   }
   sb.innerHTML=h;
-  sb.querySelectorAll(".pbtn").forEach(b=>b.addEventListener("click",()=>{ curProv=b.dataset.p; buildSidebar(); goView("region"); }));
+  sb.querySelectorAll(".pbtn").forEach(b=>b.addEventListener("click",e=>{
+    if(e.target.closest(".pcaret:not(.ghost)")){ toggleSubCol(b.dataset.p); return; }
+    curProv=b.dataset.p; buildSidebar(); goView("region");
+  }));
   sb.querySelectorAll("[data-gm]").forEach(b=>b.addEventListener("click",()=>setGroupMode(b.dataset.gm)));
+  sb.querySelectorAll(".region-tag").forEach(t=>t.addEventListener("click",()=>toggleGroupCol(t.dataset.g)));
   const sp=document.getElementById("provSearch");
-  sp.addEventListener("input",()=>{
-    const q=sp.value.trim();
-    sb.querySelectorAll(".pbtn").forEach(b=>{ b.style.display=b.dataset.name.includes(q)?"flex":"none"; });
-    // 搜索时把整组都搜没了的组标题也一起隐藏
-    sb.querySelectorAll(".region-tag").forEach(t=>{
-      let n=t.nextElementSibling, show=false;
-      while(n&&!n.classList.contains("region-tag")){
-        if(n.classList.contains("pbtn")&&n.style.display!=="none"){ show=true; break; }
-        n=n.nextElementSibling;
-      }
-      t.style.display=show?"flex":"none";
-    });
-  });
+  sp.addEventListener("input",syncSidebarView);
+  syncSidebarView();
 }
 
 /* ============ 全国概览 ============ */
