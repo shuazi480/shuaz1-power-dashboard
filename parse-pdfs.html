@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据导入 · 上传代理购电公告PDF</title>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<style>
+:root{--bg:#0b1220;--panel:#131c2e;--panel2:#0f1826;--line:#22304a;--txt:#eaf1ff;--txt2:#93a7c4;--accent:#4a9eff;--green:#3fcc7a;--red:#ff7a85;--amber:#ffb84d}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font:14px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh}
+.wrap{max-width:860px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:20px;margin-bottom:4px}
+.sub{color:var(--txt2);font-size:12.5px;margin-bottom:20px}
+a{color:var(--accent)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:36px;text-align:center;color:var(--txt2);cursor:pointer;transition:.15s}
+.drop:hover,.drop.over{border-color:var(--accent);color:var(--txt);background:rgba(74,158,255,.05)}
+.drop b{color:var(--accent)}
+button{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:9px 20px;font-size:13.5px;cursor:pointer}
+button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+button:disabled{opacity:.45;cursor:not-allowed}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:12px}
+th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--txt2);font-weight:500;white-space:nowrap}
+td.num{font-variant-numeric:tabular-nums}
+.st-ok{color:var(--green)}.st-warn{color:var(--amber)}.st-err{color:var(--red)}
+.log{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font:12px/1.8 ui-monospace,Menlo,monospace;color:var(--txt2);max-height:220px;overflow:auto;white-space:pre-wrap;margin-top:12px}
+.bar{display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap}
+.hint{font-size:12px;color:var(--txt2)}
+.kv{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚡ 数据导入 · 代理购电公告 PDF</h1>
+  <div class="sub">把从国网 / 南网 / 蒙西电网下载的各省月度《代理购电价格公告》PDF 拖进来，解析后的数据会存入浏览器，<a href="index.html">回到仪表盘</a> 即自动使用新数据。解析全部在本地浏览器完成，PDF 不会上传到任何服务器。</div>
+
+  <div class="card">
+    <div class="drop" id="drop">
+      <div style="font-size:30px;margin-bottom:8px">📄</div>
+      把 PDF 拖到此处，或 <b>点击选择文件</b>（可多选）
+      <div class="hint" style="margin-top:8px">建议文件名含省份与月份，如「江苏 2026年8月代理购电价格公告.pdf」</div>
+      <input type="file" id="file" accept=".pdf" multiple hidden>
+    </div>
+    <div class="log" id="log" hidden></div>
+  </div>
+
+  <div class="card" id="reviewCard" hidden>
+    <h3 style="font-size:15px;margin-bottom:8px">解析结果预览</h3>
+    <div class="hint">核对无误后点击「应用」。电压等级未解析的省份沿用上一期数据；<b>代理购电价格（agent）</b> 是所有图表的核心字段。</div>
+    <div id="review"></div>
+    <div class="bar">
+      <button id="apply">✔ 应用到仪表盘数据（存入本浏览器）</button>
+      <button class="ghost" id="dl">⬇ 导出 data.json（用于提交到仓库）</button>
+      <button class="ghost" id="reset">✕ 清空已存数据，恢复仓库默认</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:15px;margin-bottom:8px">当前数据状态</h3>
+    <div id="status" class="hint"></div>
+  </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+const LS_KEY = "pgd_data_v2";
+const log = m => { const el=document.getElementById('log'); el.hidden=false; el.textContent += m+"\n"; el.scrollTop=el.scrollHeight; };
+
+let base = null;   // 基准数据（localStorage 优先，否则 data.json）
+let pending = {};  // 待应用的解析结果: {prov: {month: {agent,...}}}
+
+async function loadBase(){
+  try{ const s=localStorage.getItem(LS_KEY); if(s){ const j=JSON.parse(s); if(j&&j.data) return j; } }catch(e){}
+  const r = await fetch('data.json'); return await r.json();
+}
+function showStatus(){
+  const el=document.getElementById('status');
+  const cached = localStorage.getItem(LS_KEY);
+  const provs = base && base.data ? Object.keys(base.data).length : 0;
+  let months = new Set();
+  if(base&&base.data){ for(const p in base.data){ const t=base.data[p]['单一制10kV']||{}; Object.keys(t).forEach(m=>months.add(m)); } }
+  el.innerHTML = `省份数：<b>${provs}</b> · 月份覆盖：<b>${[...months].sort((a,b)=>parseInt(a)-parseInt(b)).join('、')||'—'}</b><br>` +
+    (cached ? '<span class="st-ok">● 当前使用的是本浏览器内已导入的数据</span>' : '<span class="st-warn">● 当前使用的是仓库自带 data.json</span>');
+}
+
+/* ---------------- PDF 文本提取 ---------------- */
+async function pdfText(buf){
+  const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+  let out = "";
+  for(let p=1; p<=Math.min(pdf.numPages,6); p++){
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    // 按 y 坐标聚类成行，行内按 x 排序，保留表格结构
+    const rows = {};
+    for(const it of tc.items){
+      const y = Math.round(it.transform[5]);
+      (rows[y] = rows[y] || []).push({x: it.transform[4], s: it.str});
+    }
+    const ys = Object.keys(rows).map(Number).sort((a,b)=>b-a);
+    for(const y of ys){
+      out += rows[y].sort((a,b)=>a.x-b.x).map(o=>o.s).join(' ') + "\n";
+    }
+  }
+  return out;
+}
+
+/* ---------------- 字段解析（多模板启发式） ---------------- */
+const PROV_NAMES = ["北京","天津","河北南网","冀北","山东","山西","蒙西","上海","江苏","浙江","安徽","福建","湖北","河南","湖南","江西","辽宁","吉林","黑龙江","蒙东","陕西","甘肃","青海","宁夏","新疆","重庆","四川","广东","广西","云南","贵州","海南"];
+// 字段：公告原文关键词 → DATA 字段名
+const FIELD_PATTERNS = [
+  [/代理购电价格|代理购电工商业用户电价表?中?的?代理购电价格|购电价格(?!.*构成)/, 'agent'],
+  [/上网环节线损|线损电价|线损费用折价/, 'xiansun'],
+  [/电度输配电价|输配电价/, 'dg'],
+  [/政府性基金及附加|基金及附加/, 'jijin'],
+  [/系统运行费|系统运行费用折价|辅助服务费用/, 'xitong'],
+];
+const NUM = /(-?\d+\.\d{1,6})/g;
+
+/* ---------------- 省份 / 月份识别 ---------------- */
+const norm = s => (s||'').normalize('NFKC').replace(/[ 　]+/g, '');
+function guessProv(filename, text){
+  const f = norm(filename), head = norm(text.slice(0, 800));
+  for(const p of PROV_NAMES){
+    if(f.includes(p)) return p;
+  }
+  for(const p of PROV_NAMES){ if(head.includes(p)) return p; }
+  if(/广东|珠三角|惠州|东西两翼|粤北/.test(f+head)) return '广东';
+  return null;
+}
+function guessMonth(filename, text){
+  const src = norm(filename) + ' ' + norm(text.slice(0, 500));
+  let m = src.match(/202\d年(\d{1,2})月/);
+  if(m) return m[1] + '月';
+  m = src.match(/(\d{1,2})月份?代理购电/);
+  if(m) return m[1] + '月';
+  return null;
+}
+// 分/千瓦时 → 元/千瓦时
+function toYuan(v, ctx){
+  if(v == null) return null;
+  if(v > 3) return +(v/100).toFixed(6);        // 显然是分
+  if(v > 1.2 && /分/.test(ctx||'')) return +(v/100).toFixed(6);
+  return v;
+}
+function parseFields(text){
+  const rec = {};
+  const lines = text.split('\n').map(l => l.normalize('NFKC'));
+  // 两遍扫描：第一遍只取「含字段名且含数字」的行（典型：广西一行式公告）
+  // 第二遍：先定位「字段名出现的表头行」，再从其后的第一个数据行按列序取数（典型：江苏/广东表格式公告）
+  for(const [re, key] of FIELD_PATTERNS){
+    for(const line of lines){
+      if(re.test(line)){
+        const ms = [...line.matchAll(NUM)].map(m=>m[1]).filter(s=>{
+          const [i,d] = s.split('.');
+          return !(d && d.length >= 4 && Math.abs(parseFloat(s)) >= 1000);
+        });
+        if(ms.length){
+          const v = toYuan(parseFloat(ms[0]), line);
+          if(v != null && v > -0.5 && v < 1.5){ rec[key] = v; break; }
+        }
+      }
+    }
+  }
+  // 第二遍：表头列定位
+  const hdrIdx = lines.findIndex(l => /代理购电价格/.test(l) && /用电分类|电压等级|分类/.test(l));
+  if(hdrIdx >= 0){
+    // 字段在表头中的列序（按出现先后）
+    const hdr = lines[hdrIdx];
+    const colOrder = [];
+    for(const [re, key] of FIELD_PATTERNS){
+      const idx = hdr.search(re);
+      if(idx >= 0) colOrder.push([idx, key]);
+    }
+    colOrder.sort((a,b)=>a[0]-b[0]);
+    // 表头之后第一条含 ≥2 个数字的数据行
+    for(let i = hdrIdx+1; i < Math.min(hdrIdx+8, lines.length); i++){
+      const ms = [...lines[i].matchAll(NUM)].map(m=>m[1]);
+      if(ms.length >= 2){
+        colOrder.forEach(([,key], ci) => {
+          if(rec[key] == null && ms[ci] != null){
+            const v = toYuan(parseFloat(ms[ci]), lines[i]);
+            if(v != null && v > -0.5 && v < 1.5) rec[key] = v;
+          }
+        });
+        break;
+      }
+    }
+  }
+  // 综合平段电价 = 五项之和（与仪表盘口径一致）
+  const parts = ['agent','xiansun','dg','jijin','xitong'];
+  if(rec.agent != null){
+    const sum = parts.reduce((s,k)=> s + (rec[k] ?? 0), 0);
+    if(rec.dg != null) rec.zonghe_dg = +sum.toFixed(6);
+  }
+  return rec;
+}
+
+/* ---------------- 主流程 ---------------- */
+const drop = document.getElementById('drop'), file = document.getElementById('file');
+drop.onclick = () => file.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); handle(e.dataTransfer.files); };
+file.onchange = () => handle(file.files);
+
+async function handle(files){
+  document.getElementById('log').textContent = '';
+  for(const f of files){
+    if(!/\.pdf$/i.test(f.name)){ log(`✕ ${f.name}：不是 PDF，跳过`); continue; }
+    log(`… 解析 ${f.name}`);
+    try{
+      const text = await pdfText(await f.arrayBuffer());
+      const prov = guessProv(f.name, text);
+      const month = guessMonth(f.name, text);
+      const rec = parseFields(text);
+      if(!prov){ log(`  ✕ 未能识别省份，请把省份名写进文件名（如「江苏…pdf」）`); continue; }
+      if(!month){ log(`  ✕ 未能识别月份（如 2026年8月）`); continue; }
+      if(rec.agent == null){ log(`  ⚠ ${prov} ${month}：未找到「代理购电价格」字段，仅记录已识别字段`); }
+      else log(`  ✔ ${prov} ${month}：agent=${rec.agent}` + (rec.zonghe_dg!=null?`，综合平段=${rec.zonghe_dg}`:''));
+      pending[prov] = pending[prov] || {};
+      pending[prov][month] = { ...(pending[prov][month]||{}), ...rec, _file: f.name };
+    }catch(e){ log(`  ✕ 解析失败：${e.message}`); }
+  }
+  renderReview();
+}
+
+function renderReview(){
+  const card = document.getElementById('reviewCard'), box = document.getElementById('review');
+  const provs = Object.keys(pending);
+  if(!provs.length){ card.hidden = true; return; }
+  card.hidden = false;
+  let h = '<table><tr><th>省份</th><th>月份</th><th>代理购电价格</th><th>线损</th><th>输配电价</th><th>基金附加</th><th>系统运行费</th><th>综合平段</th><th>来源文件</th></tr>';
+  for(const p of provs) for(const m of Object.keys(pending[p])){
+    const r = pending[p][m];
+    const cell = v => v==null ? '<span class="st-warn">—</span>' : `<td class="num">${v}</td>`;
+    h += `<tr><td>${p}</td><td>${m}</td>` + ['agent','xiansun','dg','jijin','xitong','zonghe_dg'].map(k=>cell(r[k])).join('') + `<td class="hint">${r._file||''}</td></tr>`;
+  }
+  box.innerHTML = h + '</table>';
+}
+
+document.getElementById('apply').onclick = () => {
+  let n = 0;
+  for(const p in pending) for(const m in pending[p]){
+    const r = { ...pending[p][m] }; delete r._file;
+    // 写入所有电压等级（分电压解析暂未实现，先同值铺开，后续迭代）
+    if(!base.data[p]) base.data[p] = {};
+    for(const tier of base.VOLT_TIERS){
+      base.data[p][tier] = base.data[p][tier] || {};
+      base.data[p][tier][m] = { ...(base.data[p][tier][m]||{}), ...r };
+    }
+    if(base.p25 && base.p25[p]){
+      const pmap = {agent:'代理购电价格', xiansun:'上网环节线损电价', dg:'电度输配电价', jijin:'政府性基金及附加', xitong:'系统运行费折价', zonghe_dg:'综合平段电价--电网代购'};
+      for(const k in pmap){ if(r[k]!=null && base.p25[p][pmap[k]]) base.p25[p][pmap[k]][m] = r[k]; }
+    }
+    n++;
+  }
+  localStorage.setItem(LS_KEY, JSON.stringify(base));
+  log(`✔ 已应用 ${n} 条省份×月份记录到浏览器数据`);
+  pending = {}; renderReview(); showStatus();
+};
+document.getElementById('dl').onclick = () => {
+  const blob = new Blob([JSON.stringify(base)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click();
+};
+document.getElementById('reset').onclick = async () => {
+  localStorage.removeItem(LS_KEY);
+  base = await loadBase(); showStatus();
+  log('✔ 已清空浏览器内数据，恢复仓库 data.json');
+};
+
+(async () => { base = await loadBase(); showStatus(); })();
+</script>
+</body>
+</html>
