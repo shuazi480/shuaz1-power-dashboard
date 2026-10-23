@@ -136,13 +136,14 @@ function buildRows(items,scale){
 }
 function voltRank(text){
   const t=" "+text.replace(/\s+/g," ")+" ";
-  if(/不满\s*1\s*千伏/.test(t)) return 0;
-  if(/220\s*千伏/.test(t)) return 4;
-  if(/110\s*(?:[（(]\s*66\s*[)）])?\s*千伏/.test(t)) return 3;
-  if(/1\s*[-—~－]\s*10\s*(?:[（(]\s*20\s*[)）])?\s*千伏/.test(t)) return 1;
-  if(/[^0-9]10\s*(?:[（(]\s*20\s*[)）])?\s*千伏/.test(t)) return 1;
-  if(/\s10\s*(?:[（(]\s*20\s*[)）])?\s*千伏/.test(t)) return 1;
-  if(/35\s*千伏/.test(t)) return 2;
+  const q=t.replace(/\s+/g,"");            /* OCR 词间空格：千 伏 → 千伏 */
+  if(/不满\s*1\s*千\s*伏/.test(q)) return 0;
+  if(/220千伏|22〇千伏/.test(q)) return 4;
+  if(/110千伏/.test(q)) return 3;
+  if(/1[\s-—~－'′`‘’|lIi]*10(?:[（(]\s*20\s*[)）])?千伏/.test(q)) return 1;   /* 1-10 / 1'10 */
+  if(/1710千伏|1>10千伏|1?10千伏/.test(q)) return 1;          /* OCR 变体：1710 / 1>10 / 1?10 */
+  if(/[^0-9]10(?:[（(]\s*20\s*[)）])?千伏/.test(q)) return 1;
+  if(/35千伏/.test(q)) return 2;
   return null;
 }
 const RANK_NAME={0:"不满1千伏",1:"10kV",2:"35kV",3:"110kV",4:"220kV"};
@@ -210,7 +211,7 @@ function findK(cols,dg,avail){
   cands.sort((a,b)=>a.k-b.k);
   return cands[cands.length>>1];
 }
-function solveScalars(cols,K,hdr,prior){
+function solveScalars(cols,K,hdr,prior,prose){
   const pool=cols.filter(c=>c.med!=null&&c.med>-0.31&&c.med<0.99);
   const n=pool.length, combos=[];
   for(let i=0;i<n;i++)for(let j=0;j<n;j++)for(let k=0;k<n;k++)for(let l=0;l<n;l++){
@@ -243,6 +244,11 @@ function solveScalars(cols,K,hdr,prior){
       let sc=0;
       for(const f of SCALARS){
         sc += p[f].cnt*2 - p[f].spread*300 + hdrScore(f,p[f].x);
+        /* 注释值优先：注释/说明段里出现的数值若与该列一致加分，全不一致减分 */
+        if(prose&&prose[f]&&prose[f].length){
+          if(prose[f].some(c=>Math.abs(c.v-p[f].med)<1e-6)) sc+=12;
+          else sc-=5;
+        }
         if(prior&&prior[f]!=null&&Math.abs(p[f].med-prior[f])<1e-4) sc+=6;
         if(prior&&prior[f]!=null&&Math.abs(p[f].med-prior[f])>0.02) sc-=3;
       }
@@ -275,7 +281,7 @@ function kwInProse(rows,re,f){
   }
   return [...cnt.entries()].map(e=>({v:r6(parseFloat(e[0])),s:2+Math.min(e[1],4)})).sort((a,b)=>b.s-a.s).slice(0,8);
 }
-const FEN_ITEMS=/(重大水利工程建设基金|国家重大水利工程建设基金|大中型水库移民后期扶持资金|大中型水库移民后期扶持基金|水库移民后期扶持资金|水库移民后期扶持基金|可再生能源电价附加|农网还贷资金|地方水利建设基金|地方水库移民扶助基金|地方水库移民扶持基金|小型水库移民扶助基金)/g;
+const FEN_ITEMS=/(重大水利工程建设基金|国家重大水利工程建设基金|大中型水库移民后期扶持资金|大中型水库移民后期扶持基金|中型水库移民后期扶持资金|水库移民后期扶持资金|水库移民后期扶持基金|可再生能源电价附加|农网还贷资[金企]|农网还贷资金|地方水利建设基金|地方水库移民扶助基金|地方水库移民扶持基金|小型水库移民扶助基金)/g;
 function jijinFen(rows){
   /* 每页拼成整段文本再去掉空白：注释里「分钱」明细常跨行（如「可再生能/源电价附加 1.9 分钱」），
      取「分钱」前最后一个数值即为该明细单价 */
@@ -288,9 +294,10 @@ function jijinFen(rows){
     const parts=t.split(FEN_ITEMS);
     for(let i=1;i<parts.length;i+=2){
       const seg=parts[i+1]||"";
-      const k=seg.indexOf("分钱");
-      if(k<0) continue;
-      const toks=(seg.slice(0,k).match(/-?\d+(?:\.\d+)?/g)||[]).map(parseFloat).filter(v=>Math.abs(v)<30);
+      /* 「0.105 分钱」或湖南「2 分、」：取紧跟「分」的数值（排除 分之/分钟/分时） */
+      const km=seg.match(/-?\d+(?:\.\d+)?\s*分(?![:之钟内])/);
+      if(!km) continue;
+      const toks=[parseFloat(km[0].replace(/\s*分.*/,""))].filter(v=>Math.abs(v)<30);
       if(!toks.length) continue;
       const kw=parts[i].replace("后期扶持基金","后期扶持资金");
       seen.set(kw,toks[toks.length-1]);
@@ -322,63 +329,50 @@ function parseAnnouncement(items,opt){
     if(used.nums.length<3||seenRow.has(used)) continue;
     seenRow.add(used); rawTier.push({row:used,rank:vr});
   }
-  rawTier.sort((a,b)=>a.row.y-b.row.y);
+  rawTier.sort((a,b)=>((a.row.p||1)-(b.row.p||1))||(a.row.y-b.row.y));
 
-  const blocks=[]; let cur=[];
-  for(const t of rawTier){ if(cur.length&&t.rank<cur[cur.length-1].rank){blocks.push(cur);cur=[];} cur.push(t); }
-  if(cur.length) blocks.push(cur);
-  /* 用表格左侧的「两部制/单一制」标签（横排或竖排单字）给每个区块标注 */
-  const blockLabel=(blk)=>{
-    const ys=blk.map(t=>t.row.y);
-    const y0=Math.min(...ys), y1=Math.max(...ys);
-    let minX=Infinity; for(const t of blk) for(const i2 of t.row.items) minX=Math.min(minX,i2.x);
-    const pg=blk[0].row.p||1;
-    let best=null;
-    for(const it of items){
-      if((it.p||1)!==pg) continue;
-      const sv=String(it.s).replace(/\s+/g,"");
-      if(!sv) continue;
-      let zhi=null;
-      if(/两/.test(sv)&&/部/.test(sv)) zhi="两部制";
-      else if(sv==="单"||sv==="单一制"||(sv.includes("单")&&sv.length<=3&&/单一/.test(sv))) zhi="单一制";
-      else if(sv==="两") zhi="两部制";
-      if(!zhi) continue;
-      if(it.x>minX-6||it.x<minX-170) continue;
-      if(it.y<y0-45||it.y>y1+45) continue;
-      const d=Math.min(Math.abs(it.y-y0),Math.abs(it.y-y1));
-      if(!best||d<best.d) best={d,zhi};
-    }
-    return best?best.zhi:null;
-  };
-  /* 去重：同标签且数值完全相同的区块（如江苏单一制100千伏及以上/以下两段重复） */
-  for(let i=blocks.length-1;i>=0;i--){
-    for(let j=0;j<i;j++){
-      const li=blockLabel(blocks[i]), lj=blockLabel(blocks[j]);
-      const ni=blocks[i].map(t=>t.row.nums.map(n=>n.v).join(",")).join("|");
-      const nj=blocks[j].map(t=>t.row.nums.map(n=>n.v).join(",")).join("|");
-      if(li&&li===lj&&ni===nj){ blocks.splice(i,1); break; }
-    }
-  }
-  let useBlocks=blocks;
-  if(blocks.length>2){
-    useBlocks=[...blocks].sort((a,b)=>b.length-a.length).slice(0,2).sort((a,b)=>a[0].row.y-b[0].row.y);
-    warns.push("检测到 "+blocks.length+" 个电压档区块，只取最大的 2 个，请核对");
-  }
-  const tierMap={};
-  useBlocks.forEach((blk,bi)=>{
-    let zhi=blockLabel(blk);
-    if(!zhi) zhi=useBlocks.length===2?(bi===0?"单一制":"两部制"):"两部制";
-    for(const t of blk){
-      const key=zhi+RANK_NAME[t.rank];
-      if(!TIERS.includes(key)||tierMap[key]) continue;
-      tierMap[key]={cells:t.row.nums, y:t.row.y, row:t.row};
-    }
-  });
-  if(!Object.keys(tierMap).length) warns.push("未识别到电压等级表");
-
+  /* 逐行判定制式（不再按区块切分——各省表格电压有升有降，区块切分不可靠）：
+     ① 行内文本带「两部制/单一制」 ② 行内出现该档输配电价数值（与查表值吻合）
+     ③ 行左侧竖排/横排标签 ④ 继承同一页上一行 */
   const dg={};
   for(const t of TIERS) if(lookup&&lookup[t]!=null) dg[t]=lookup[t];
   if(!Object.keys(dg).length) warns.push("输配电价查询表无此省："+prov);
+  if(!Object.keys(dg).length) for(const t of TIERS) dg[t]=null;
+  const tierMap={};
+  let lastZhi=null, lastY=null, lastP=null;
+  for(const t of rawTier){
+    const txt=String(t.row.text||"");
+    let zhi=null;
+    if(/两\s*部/.test(txt)) zhi="两部制";
+    else if(/单\s*一/.test(txt)) zhi="单一制";
+    if(!zhi){
+      const dTwo=dg["两部制"+RANK_NAME[t.rank]], dOne=dg["单一制"+RANK_NAME[t.rank]];
+      const mTwo=dTwo!=null&&t.row.nums.some(n=>Math.abs(n.v-dTwo)<2e-4);
+      const mOne=dOne!=null&&t.row.nums.some(n=>Math.abs(n.v-dOne)<2e-4);
+      if(mTwo&&!mOne) zhi="两部制";
+      else if(mOne&&!mTwo) zhi="单一制";
+    }
+    if(!zhi){
+      let minX=Infinity; for(const i2 of t.row.items) minX=Math.min(minX,i2.x);
+      const pg=t.row.p||1;
+      for(const it of items){
+        if((it.p||1)!==pg) continue;
+        if(it.x>minX-6||it.x<minX-170) continue;
+        if(Math.abs(it.y-t.row.y)>40) continue;
+        const sv=String(it.s).replace(/\s+/g,"");
+        if(sv==="单"||sv==="单一制"){ zhi="单一制"; break; }
+        if(sv==="两"||sv==="两部制"){ zhi="两部制"; break; }
+      }
+    }
+    if(!zhi&&lastZhi!=null&&(t.row.p||1)===lastP&&Math.abs(t.row.y-lastY)<160) zhi=lastZhi;
+    lastZhi=zhi; lastY=t.row.y; lastP=t.row.p||1;
+    if(!zhi) continue;
+    const key=zhi+RANK_NAME[t.rank];
+    if(!TIERS.includes(key)||tierMap[key]) continue;
+    tierMap[key]={cells:t.row.nums, y:t.row.y, row:t.row};
+  }
+  if(!Object.keys(tierMap).length) warns.push("未识别到电压等级表");
+
   const avail=TIERS.filter(t=>tierMap[t]&&dg[t]!=null);
 
   const cols=buildColumns(tierMap,avail);
@@ -394,7 +388,7 @@ function parseAnnouncement(items,opt){
     jijin:kwInProse(rows,/政府性基金及附加|政府性基金/,"jijin")
   });
   let scalar={}, conf={};
-  const solved=(K!=null)?solveScalars(cols,K,hdr,prior):null;
+  const solved=(K!=null)?solveScalars(cols,K,hdr,prior,prose0(rows)):null;
   if(solved) for(const f of SCALARS){ scalar[f]=r6(solved[f].med); conf[f]={src:"列+恒等式", n:solved[f].cnt, ok:true}; }
   /* 若档位行取自「1.5倍执行价格」表，只有代理价是 1.5 倍，其余三项同值：
      代理价 ≈ 注释候选 × 1.5 时，改用注释值 */
@@ -448,6 +442,17 @@ function parseAnnouncement(items,opt){
     if(pick!=null){ scalar[f]=pick; conf[f]={src,ok:false}; }
   }
 
+  /* 恒等式残差：已知三项 + K → 直接推出第四项 */
+  if(K!=null){
+    const known=SCALARS.filter(f=>scalar[f]!=null);
+    if(known.length===3){
+      const miss=SCALARS.find(f=>scalar[f]==null);
+      const rv=r6(K-SCALARS.filter(f=>f!==miss).reduce((a,f)=>a+scalar[f],0));
+      const rg=RANGE[miss];
+      if(rv>=rg[0]&&rv<=rg[1]){ scalar[miss]=rv; conf[miss]={src:"恒等式残差",ok:true}; warns.push(LABEL[miss]+" 由恒等式残差推出，请核对"); }
+    }
+  }
+
   /* 恒等式组合校正：四项之和应等于 K（平段-输配电价），偏差大则在候选池里重新组合 */
   if(K!=null&&!agentFixed&&SCALARS.every(f=>scalar[f]!=null)){
     const cur=SCALARS.map(f=>scalar[f]);
@@ -458,12 +463,23 @@ function parseAnnouncement(items,opt){
         if(scalar[f]!=null) set.push({v:scalar[f],w:1});
         for(const c of (prose[f]||[])) if(!set.some(x=>Math.abs(x.v-c.v)<1e-9)) set.push({v:c.v,w:0});
         if(prior&&prior[f]!=null&&!set.some(x=>Math.abs(x.v-prior[f])<1e-9)) set.push({v:prior[f],w:0});
+        const others=SCALARS.filter(g=>g!==f);
+        if(others.every(g=>scalar[g]!=null)){
+          const rv=r6(K-others.reduce((a,g)=>a+scalar[g],0));
+          if(!set.some(x=>Math.abs(x.v-rv)<1e-9)) set.push({v:rv,w:0.5});
+        }
         return set.slice(0,8);
       });
       let best=null;
       const rec=(i,sum,arr)=>{
         if(i===SCALARS.length){
-          const d=Math.abs(sum-K), w=arr.reduce((a,b)=>a+b.w,0);
+          const d=Math.abs(sum-K);
+          let w=arr.reduce((a,b)=>a+b.w,0);
+          /* 注释命中加权：注释里有的值优先（+2.5），注释有候选却不匹配则惩罚（−1） */
+          arr.forEach((opt,fi)=>{
+            const pr=prose[SCALARS[fi]];
+            if(pr&&pr.length){ w += pr.some(c=>Math.abs(c.v-opt.v)<1e-6)?2.5:-1; }
+          });
           if(!best||d<best.d-1e-9||(Math.abs(d-best.d)<1e-9&&w>best.w)) best={d,w,pick:arr.map(x=>x.v)};
           return;
         }
@@ -531,31 +547,145 @@ async function pdfItems(file){
   const buf=await file.arrayBuffer();
   const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
   const items=[];
+  let textCount=0;
   for(let i=1;i<=doc.numPages;i++){
     const page=await doc.getPage(i);
     const tc=await page.getTextContent();
     const vp=page.getViewport({scale:1});
     for(const it of tc.items){
       if(!it.str||!it.str.trim()) continue;
+      textCount++;
       const t=it.transform;
       items.push({p:i,s:it.str.trim(),x:Math.round(t[4]*10)/10,y:Math.round((vp.height-t[5])*10)/10,
                   w:Math.round((it.width||0)*10)/10,h:Math.round((it.height||0)*10)/10});
     }
   }
+  /* 扫描版 PDF（无文字层）：渲染成图片走 OCR */
+  if(textCount<15){
+    if(typeof ensureTesseract==="function") await ensureTesseract();
+    if(typeof Tesseract==="undefined") throw new Error("扫描版 PDF 需要 OCR，但引擎未加载成功");
+    for(let i=1;i<=Math.min(doc.numPages,3);i++){
+      const page=await doc.getPage(i);
+      const vp=page.getViewport({scale:2});
+      const cv=document.createElement("canvas"); cv.width=vp.width; cv.height=vp.height;
+      await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
+      const id=cv.getContext("2d").getImageData(0,0,cv.width,cv.height);
+      cleanCanvas(id.data,cv.width,cv.height);
+      cv.getContext("2d").putImageData(id,0,0);
+      const out=await Tesseract.recognize(cv,"chi_sim+eng",{logger:()=>{}});
+      items.push(...ocrWordsToItems(out.data.words||[],2).map(it=>({...it,p:i})));
+    }
+  }
   return {items,pages:doc.numPages};
 }
-async function ocrItems(file){
-  if(typeof Tesseract==="undefined"){
-    await new Promise((res,rej)=>{const s=document.createElement("script");
-      s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js";
-      s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+const OCR_CDNS=["https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js",
+  "https://fastly.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js",
+  "https://unpkg.com/tesseract.js@5.1.0/dist/tesseract.min.js"];
+async function ensureTesseract(){
+  if(typeof Tesseract!=="undefined") return true;
+  for(const src of OCR_CDNS){
+    try{ await new Promise((res,rej)=>{const s=document.createElement("script");
+      s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s);});
+      if(typeof Tesseract!=="undefined") return true;
+    }catch(e){}
   }
-  const out=await Tesseract.recognize(file,"chi_sim+eng",{logger:()=>{}});
+  return false;
+}
+/* 图像预处理：二值化 + 去表格线（in place，输出黑字白底） */
+function cleanCanvas(data,w,h){
+  const N=w*h;
+  const ink=new Uint8Array(N);
+  for(let i=0;i<N;i++){ const j=i*4; const g=(data[j]*299+data[j+1]*587+data[j+2]*114)/1000; ink[i]=g<230?1:0; }
+  /* 横线：一行墨迹 > 45% 宽 */
+  const hline=new Uint8Array(h);
+  for(let r=0;r<h;r++){ let c=0; for(let x=0;x<w;x++) c+=ink[r*w+x]; if(c>w*0.45) hline[r]=1; }
+  /* 竖线：在首末横线之间的行带内，找最长墨迹段 > 300px 的列 */
+  let top=-1,bot=-1;
+  for(let r=0;r<h;r++) if(hline[r]){ if(top<0) top=r; bot=r; }
+  const vline=new Uint8Array(w);
+  if(top>=0&&bot>top){
+    const bh=bot-top;
+    for(let x=0;x<w;x++){
+      let best=0,cur=0,gap=0;
+      for(let r=top;r<=bot;r++){
+        if(ink[r*w+x]){ cur++; gap=0; }
+        else{ gap++; if(gap>3){ if(cur>best) best=cur; cur=0; } }
+      }
+      if(cur>best) best=cur;
+      if(best>Math.min(300,bh*0.6)) vline[x]=1;
+    }
+  }
+  /* 抹线（±2px） */
+  for(let r=0;r<h;r++) if(hline[r]) for(let d=-2;d<=2;d++){ const rr=r+d; if(rr<0||rr>=h) continue; for(let x=0;x<w;x++) ink[rr*w+x]=0; }
+  for(let x=0;x<w;x++) if(vline[x]) for(let d=-2;d<=2;d++){ const xx=x+d; if(xx<0||xx>=w) continue; for(let r=0;r<h;r++) ink[r*w+xx]=0; }
+  for(let i=0;i<N;i++){ const j=i*4; const v=ink[i]?0:255; data[j]=data[j+1]=data[j+2]=v; data[j+3]=255; }
+}
+/* OCR 词 → 归一化 items：按行聚类、数字跨词合并、去杂质 */
+function ocrWordsToItems(words,scaleDiv){
+  const norm=w=>{ const b=w.bbox||{x0:w.x,y0:w.y,x1:w.x+(w.w||0),y1:w.y+(w.h||0)};
+                  return {s:String(w.text||w.s||"").trim(),x0:b.x0,y0:b.y0,x1:b.x1,y1:b.y1}; };
+  const ws=words.map(norm).filter(w=>w.s).sort((a,b)=>(a.y0-b.y0)||(a.x0-b.x0));
+  if(!ws.length) return [];
+  const hs=ws.map(w=>w.y1-w.y0).sort((a,b)=>a-b);
+  const medH=hs[Math.floor(hs.length/2)]||16;
+  const lines=[];
+  for(const w of ws){
+    let L=lines.find(L=>Math.abs((L.y0+L.y1)/2-(w.y0+w.y1)/2)<=medH*0.55);
+    if(!L){ L={y0:w.y0,y1:w.y1,words:[]}; lines.push(L); }
+    L.words.push(w); L.y0=Math.min(L.y0,w.y0); L.y1=Math.max(L.y1,w.y1);
+  }
+  const fixTok=t=>{
+    t=t.replace(/\s+/g,"").replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+       .replace(/[，]/g,"，").replace(/[．]/g,".");
+    t=t.replace(/(^|[^\d.])\.(\d+)/g,"$10.$2");   /* 「《.613091」→「0.613091」 */
+    t=t.replace(/(^|[^\d.])0(\d{6})(?![\d.])/g,"$10.$2");  /* 「0139400」→「0.139400」 OCR 丢小数点 */
+    return t;
+  };
   const items=[];
-  (out.data.words||[]).forEach(w=>{
-    items.push({p:1,s:w.text,x:w.bbox.x0,y:w.bbox.y0,w:w.bbox.x1-w.bbox.x0,h:w.bbox.y1-w.bbox.y0});
-  });
-  return {items,pages:1};
+  for(const L of lines){
+    L.words.sort((a,b)=>a.x0-b.x0);
+    const toks=[];
+    for(const w of L.words){
+      const last=toks[toks.length-1];
+      const gap=last? w.x0-last.x1 : 999;
+      const charW=medH*0.62;
+      const joinable=last && gap<charW*1.4 && (
+        (/\d\.?$/.test(last.s)&&/^\d/.test(w.s)) ||            /* 「0.」+「139400」 */
+        (/^[（(【\[〔"'']*\.$/.test(last.s)&&/^\d/.test(w.s)) || /* 「(.」+「788791」 */
+        (/^\d+$/.test(w.s)&&/\d$/.test(last.s)&&gap<charW*0.6)   /* 被拆开的数字 */
+      );
+      if(joinable){ last.s+=w.s; last.x1=w.x1; }
+      else toks.push({s:w.s,x0:w.x0,x1:w.x1});
+    }
+    const yTop=Math.round(L.y0/scaleDiv), hgt=Math.round((L.y1-L.y0)/scaleDiv);
+    for(const t of toks){
+      const st=fixTok(t.s);
+      if(!st) continue;
+      items.push({p:1,s:st,x:Math.round(t.x0/scaleDiv),y:yTop,w:Math.round((t.x1-t.x0)/scaleDiv),h:hgt});
+    }
+  }
+  return items;
+}
+async function ocrImageBitmap(bmp,pageNo){
+  let scale=Math.min(1,3000/bmp.width);
+  if(bmp.width*scale<1100) scale=Math.min(2,1100/bmp.width);
+  const cw=Math.max(1,Math.round(bmp.width*scale)), ch=Math.max(1,Math.round(bmp.height*scale));
+  const cv=document.createElement("canvas"); cv.width=cw; cv.height=ch;
+  const cx=cv.getContext("2d",{willReadFrequently:true});
+  cx.fillStyle="#fff"; cx.fillRect(0,0,cw,ch);
+  cx.drawImage(bmp,0,0,cw,ch);
+  const id=cx.getImageData(0,0,cw,ch);
+  cleanCanvas(id.data,cw,ch);
+  cx.putImageData(id,0,0);
+  const out=await Tesseract.recognize(cv,"chi_sim+eng",{logger:()=>{}});
+  return ocrWordsToItems(out.data.words||[],scale).map(it=>({...it,p:pageNo||1}));
+}
+async function ocrItems(file){
+  const ok=await ensureTesseract();
+  if(!ok) throw new Error("OCR 引擎加载失败（需联网访问 jsdelivr CDN）");
+  const bmp=await createImageBitmap(file);
+  try{ return {items:await ocrImageBitmap(bmp,1),pages:1}; }
+  finally{ try{bmp.close();}catch(e){} }
 }
 
 let DATA=null;
