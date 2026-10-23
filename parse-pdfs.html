@@ -106,13 +106,19 @@ const LABEL = {agent:"代理价", xiansun:"线损", jijin:"基金", xitong:"系�
 
 function buildRows(items,scale){
   scale=scale||1;
-  const sorted=[...items].sort((a,b)=>(a.y-b.y)||(a.x-b.x));
+  const byPage={};
+  for(const it of items){ const k=it.p||1; (byPage[k]=byPage[k]||[]).push(it); }
   const rows=[];
-  for(const it of sorted){
-    const tol=Math.max(2.5, Math.min(4.5,(it.h||7)*0.5));
-    let r=rows.find(r=>Math.abs(r.y-it.y)<=tol);
-    if(!r){ r={y:it.y,h:it.h||7,items:[]}; rows.push(r); }
-    r.items.push(it);
+  for(const pk of Object.keys(byPage)){
+    const sorted=byPage[pk].sort((a,b)=>(a.y-b.y)||(a.x-b.x));
+    const prows=[];
+    for(const it of sorted){
+      const tol=Math.max(2.5, Math.min(4.5,(it.h||7)*0.5));
+      let r=prows.find(r=>Math.abs(r.y-it.y)<=tol);
+      if(!r){ r={y:it.y,h:it.h||7,items:[],p:+pk}; prows.push(r); }
+      r.items.push(it);
+    }
+    for(const r of prows) rows.push(r);
   }
   for(const r of rows){
     r.items.sort((a,b)=>a.x-b.x);
@@ -125,17 +131,17 @@ function buildRows(items,scale){
     }
     r.nums.sort((a,b)=>a.x-b.x);
   }
-  rows.sort((a,b)=>a.y-b.y);
+  rows.sort((a,b)=>(a.p-b.p)||(a.y-b.y));
   return rows;
 }
 function voltRank(text){
   const t=" "+text.replace(/\s+/g," ")+" ";
   if(/不满\s*1\s*千伏/.test(t)) return 0;
   if(/220\s*千伏/.test(t)) return 4;
-  if(/110\s*(?:\(66\))?\s*千伏/.test(t)) return 3;
-  if(/1\s*[-—~]\s*10\s*(?:\(20\))?\s*千伏/.test(t)) return 1;
-  if(/[^0-9]10\s*(?:\(20\))?\s*千伏/.test(t)) return 1;
-  if(/\s10\s*(?:\(20\))?\s*千伏/.test(t)) return 1;
+  if(/110\s*(?:[（(]\s*66\s*[)）])?\s*千伏/.test(t)) return 3;
+  if(/1\s*[-—~－]\s*10\s*(?:[（(]\s*20\s*[)）])?\s*千伏/.test(t)) return 1;
+  if(/[^0-9]10\s*(?:[（(]\s*20\s*[)）])?\s*千伏/.test(t)) return 1;
+  if(/\s10\s*(?:[（(]\s*20\s*[)）])?\s*千伏/.test(t)) return 1;
   if(/35\s*千伏/.test(t)) return 2;
   return null;
 }
@@ -246,14 +252,22 @@ function solveScalars(cols,K,hdr,prior){
   return best?best.p:null;
 }
 function kwInProse(rows,re,f){
+  /* 行内各文本块用 \u0001 分隔再匹配：关键词允许被空格/换行拆开，
+     但数字不会跨块合并（避免「折价 7 0.012228」变成 70.012228） */
+  const rx=new RegExp("("+re.source.split("|").map(a=>a.split("").join("\u0001?")).join("|")+")","g");
   const cnt=new Map();
   for(const r of rows){
     if(voltRank(r.text)!==null) continue;
-    const t=r.text.replace(/\s+/g,"");
-    const rx=new RegExp(re.source,"g"); let m;
-    while((m=rx.exec(t))){
-      const seg=t.slice(m.index,m.index+70);
-      for(const n of (seg.match(/-?\d+\.\d{3,}/g)||[]).map(Number)){
+    const parts=r.items.map(i=>String(i.s).replace(/\s+/g,"")).filter(Boolean);
+    if(!parts.length) continue;
+    const joined=parts.join("\u0001");
+    rx.lastIndex=0; let m;
+    while((m=rx.exec(joined))){
+      const seg=joined.slice(m.index+m[0].length, m.index+m[0].length+110);
+      for(const tok of seg.split("\u0001").slice(0,9)){
+        const mm=tok.match(/-?\d+\.\d+/);
+        if(!mm) continue;
+        const n=parseFloat(mm[0]);
         if(inRange(f,n)){ const k=n.toFixed(5); cnt.set(k,(cnt.get(k)||0)+1); }
       }
       if(cnt.size>20) break;
@@ -261,16 +275,25 @@ function kwInProse(rows,re,f){
   }
   return [...cnt.entries()].map(e=>({v:r6(parseFloat(e[0])),s:2+Math.min(e[1],4)})).sort((a,b)=>b.s-a.s).slice(0,8);
 }
-const FEN_ITEMS=/(重大水利工程建设基金|大中型水库移民后期扶持基金|水库移民后期扶持资金|可再生能源电价附加|农网还贷资金|地方水利建设基金|小型水库移民扶助基金)/g;
+const FEN_ITEMS=/(重大水利工程建设基金|国家重大水利工程建设基金|大中型水库移民后期扶持资金|大中型水库移民后期扶持基金|水库移民后期扶持资金|水库移民后期扶持基金|可再生能源电价附加|农网还贷资金|地方水利建设基金|地方水库移民扶助基金|地方水库移民扶持基金|小型水库移民扶助基金)/g;
 function jijinFen(rows){
+  /* 每页拼成整段文本再去掉空白：注释里「分钱」明细常跨行（如「可再生能/源电价附加 1.9 分钱」），
+     取「分钱」前最后一个数值即为该明细单价 */
   const seen=new Map();
-  for(const r of rows){
-    const t=r.text.replace(/\s+/g,"");
+  const pageText={};
+  for(const r of rows){ const k=r.p||1; pageText[k]=(pageText[k]||"")+r.text; }
+  for(const t0 of Object.values(pageText)){
+    const t=t0.replace(/\s+/g,"");
     FEN_ITEMS.lastIndex=0;
     const parts=t.split(FEN_ITEMS);
     for(let i=1;i<parts.length;i+=2){
-      const m=(parts[i+1]||"").slice(0,40).match(/(-?\d+(?:\.\d+)?)\s*分钱/);
-      if(m){ const v=parseFloat(m[1]); if(Math.abs(v)<30) seen.set(parts[i],v); }
+      const seg=parts[i+1]||"";
+      const k=seg.indexOf("分钱");
+      if(k<0) continue;
+      const toks=(seg.slice(0,k).match(/-?\d+(?:\.\d+)?/g)||[]).map(parseFloat).filter(v=>Math.abs(v)<30);
+      if(!toks.length) continue;
+      const kw=parts[i].replace("后期扶持基金","后期扶持资金");
+      seen.set(kw,toks[toks.length-1]);
     }
   }
   if(seen.size<2) return null;
@@ -304,6 +327,38 @@ function parseAnnouncement(items,opt){
   const blocks=[]; let cur=[];
   for(const t of rawTier){ if(cur.length&&t.rank<cur[cur.length-1].rank){blocks.push(cur);cur=[];} cur.push(t); }
   if(cur.length) blocks.push(cur);
+  /* 用表格左侧的「两部制/单一制」标签（横排或竖排单字）给每个区块标注 */
+  const blockLabel=(blk)=>{
+    const ys=blk.map(t=>t.row.y);
+    const y0=Math.min(...ys), y1=Math.max(...ys);
+    let minX=Infinity; for(const t of blk) for(const i2 of t.row.items) minX=Math.min(minX,i2.x);
+    const pg=blk[0].row.p||1;
+    let best=null;
+    for(const it of items){
+      if((it.p||1)!==pg) continue;
+      const sv=String(it.s).replace(/\s+/g,"");
+      if(!sv) continue;
+      let zhi=null;
+      if(/两/.test(sv)&&/部/.test(sv)) zhi="两部制";
+      else if(sv==="单"||sv==="单一制"||(sv.includes("单")&&sv.length<=3&&/单一/.test(sv))) zhi="单一制";
+      else if(sv==="两") zhi="两部制";
+      if(!zhi) continue;
+      if(it.x>minX-6||it.x<minX-170) continue;
+      if(it.y<y0-45||it.y>y1+45) continue;
+      const d=Math.min(Math.abs(it.y-y0),Math.abs(it.y-y1));
+      if(!best||d<best.d) best={d,zhi};
+    }
+    return best?best.zhi:null;
+  };
+  /* 去重：同标签且数值完全相同的区块（如江苏单一制100千伏及以上/以下两段重复） */
+  for(let i=blocks.length-1;i>=0;i--){
+    for(let j=0;j<i;j++){
+      const li=blockLabel(blocks[i]), lj=blockLabel(blocks[j]);
+      const ni=blocks[i].map(t=>t.row.nums.map(n=>n.v).join(",")).join("|");
+      const nj=blocks[j].map(t=>t.row.nums.map(n=>n.v).join(",")).join("|");
+      if(li&&li===lj&&ni===nj){ blocks.splice(i,1); break; }
+    }
+  }
   let useBlocks=blocks;
   if(blocks.length>2){
     useBlocks=[...blocks].sort((a,b)=>b.length-a.length).slice(0,2).sort((a,b)=>a[0].row.y-b[0].row.y);
@@ -311,7 +366,8 @@ function parseAnnouncement(items,opt){
   }
   const tierMap={};
   useBlocks.forEach((blk,bi)=>{
-    const zhi=useBlocks.length===2?(bi===0?"单一制":"两部制"):"两部制";
+    let zhi=blockLabel(blk);
+    if(!zhi) zhi=useBlocks.length===2?(bi===0?"单一制":"两部制"):"两部制";
     for(const t of blk){
       const key=zhi+RANK_NAME[t.rank];
       if(!TIERS.includes(key)||tierMap[key]) continue;
@@ -331,28 +387,94 @@ function parseAnnouncement(items,opt){
   const K=Kc?Kc.k:null;
   if(K==null) warns.push("未定位到平段电价列，四项需人工确认");
 
-  let scalar={}, conf={};
-  const solved=(K!=null)?solveScalars(cols,K,hdr,prior):null;
-  if(solved) for(const f of SCALARS){ scalar[f]=r6(solved[f].med); conf[f]={src:"列+恒等式", n:solved[f].cnt, ok:true}; }
-  const prose={
+  const prose0=(rows)=>({
     agent:kwInProse(rows,/代理工商业购电价格|代理购电价格|代理购电价/,"agent"),
     xiansun:kwInProse(rows,/上网环节线损费用折价|上网环节线损电价|线损费用折价|线损折价|线损电价/,"xiansun"),
     xitong:kwInProse(rows,/系统运行费用折合度电水平|系统运行费用折价|系统运行费折价|系统运行费用/,"xitong"),
     jijin:kwInProse(rows,/政府性基金及附加|政府性基金/,"jijin")
-  };
+  });
+  let scalar={}, conf={};
+  const solved=(K!=null)?solveScalars(cols,K,hdr,prior):null;
+  if(solved) for(const f of SCALARS){ scalar[f]=r6(solved[f].med); conf[f]={src:"列+恒等式", n:solved[f].cnt, ok:true}; }
+  /* 若档位行取自「1.5倍执行价格」表，只有代理价是 1.5 倍，其余三项同值：
+     代理价 ≈ 注释候选 × 1.5 时，改用注释值 */
+  let agentFixed=false;
+  if(solved&&scalar.agent!=null){
+    const pa=[...(prose0(rows).agent||[])];
+    for(const c of pa){
+      if(Math.abs(scalar.agent-c.v*1.5)<8e-4){
+        scalar.agent=c.v; conf.agent={src:"列+恒等式(1.5倍校正)", n:solved.agent.cnt, ok:true};
+        warns.push("代理价原为 1.5 倍表数值，已校正，请核对");
+        agentFixed=true;
+        break;
+      }
+    }
+  }
+  const prose=prose0(rows);
   const jf=jijinFen(rows);
+  /* 注释里的「平均上网电价/当月平均购电价格 X、历史偏差电费折价 Y」→ 代理价 = X+Y */
+  const sumNote=(()=>{
+    const pageText={};
+    for(const r of rows){ const k=r.p||1; pageText[k]=(pageText[k]||"")+r.text; }
+    const out=[];
+    for(const t0 of Object.values(pageText)){
+      const t=t0.replace(/\s+/g,"").replace(/[−－]/g,"-");
+      const rx=/(平均上网电价|当月平均购电价格)(-?\d+(?:\.\d+)?)元?.{0,28}?历史偏差电费折价(-?\d+(?:\.\d+)?)/g;
+      let m;
+      while((m=rx.exec(t))){
+        const v=parseFloat(m[2])+parseFloat(m[3]);
+        if(v>0.05&&v<1.1) out.push({v:r6(v),s:9});
+      }
+    }
+    return out;
+  })();
+  if(sumNote.length) prose.agent=[...sumNote,...(prose.agent||[])];
   for(const f of SCALARS){
     if(scalar[f]!=null) continue;
     if(f==="jijin"&&jf&&jf.n>=2){ scalar[f]=jf.v; conf[f]={src:"分钱求和",n:jf.n,ok:false}; continue; }
     let pick=null,src=null;
-    if(prior&&prior[f]!=null){ const hit=(prose[f]||[]).find(c=>Math.abs(c.v-prior[f])<1e-6); if(hit){pick=hit.v;src="注释(与上月一致)";} }
-    if(pick==null&&prose[f]&&prose[f].length){ pick=prose[f][0].v; src="注释"; }
+    /* 剔除「1.5 倍执行价格」候选：若某候选 = 另一候选 × 1.5，则舍大取小 */
+    let cands=(prose[f]||[]).slice();
+    if(f==="agent"&&cands.length>=2){
+      cands=cands.filter(c=>!cands.some(b=>b!==c&&Math.abs(c.v-b.v*1.5)<8e-4));
+    }
+    if(prior&&prior[f]!=null){ const hit=cands.find(c=>Math.abs(c.v-prior[f])<1e-6); if(hit){pick=hit.v;src="注释(与上月一致)";} }
+    if(pick==null&&cands.length){ pick=cands[0].v; src="注释"; }
     if(pick==null&&K!=null){
       const miss=SCALARS.filter(g=>scalar[g]==null&&g!==f);
       if(miss.length===0){ let rest=K; for(const g of SCALARS) if(g!==f) rest-=(scalar[g]||0); if(inRange(f,rest)){pick=r6(rest);src="恒等式反解";} }
     }
     if(pick==null&&prior&&prior[f]!=null){ pick=prior[f]; src="沿用上月"; }
     if(pick!=null){ scalar[f]=pick; conf[f]={src,ok:false}; }
+  }
+
+  /* 恒等式组合校正：四项之和应等于 K（平段-输配电价），偏差大则在候选池里重新组合 */
+  if(K!=null&&!agentFixed&&SCALARS.every(f=>scalar[f]!=null)){
+    const cur=SCALARS.map(f=>scalar[f]);
+    const dev0=Math.abs(cur.reduce((a,b)=>a+b,0)-K);
+    if(dev0>1.5e-3){
+      const pools=SCALARS.map(f=>{
+        const set=[];
+        if(scalar[f]!=null) set.push({v:scalar[f],w:1});
+        for(const c of (prose[f]||[])) if(!set.some(x=>Math.abs(x.v-c.v)<1e-9)) set.push({v:c.v,w:0});
+        if(prior&&prior[f]!=null&&!set.some(x=>Math.abs(x.v-prior[f])<1e-9)) set.push({v:prior[f],w:0});
+        return set.slice(0,8);
+      });
+      let best=null;
+      const rec=(i,sum,arr)=>{
+        if(i===SCALARS.length){
+          const d=Math.abs(sum-K), w=arr.reduce((a,b)=>a+b.w,0);
+          if(!best||d<best.d-1e-9||(Math.abs(d-best.d)<1e-9&&w>best.w)) best={d,w,pick:arr.map(x=>x.v)};
+          return;
+        }
+        for(const opt of pools[i]) rec(i+1,sum+opt.v,[...arr,opt]);
+      };
+      rec(0,0,[]);
+      if(best&&best.d<8e-4){
+        SCALARS.forEach((f,i)=>{ scalar[f]=r6(best.pick[i]); conf[f]={src:"恒等式组合校正",ok:true}; });
+        warns.push("四项之和与平段恒等式不符，已按恒等式重新组合，请核对");
+      }
+    }
   }
 
   const rec={};
@@ -370,8 +492,10 @@ function parseAnnouncement(items,opt){
   return {rec,dg,scalar,conf,K,warns,tiersFound:Object.keys(tierMap),hit};
 }
 
+const PROV_ALIAS={"河北省":"河北南网","河北":"河北南网","内蒙古东部":"蒙东","内蒙古西部":"蒙西","蒙东电力":"蒙东"};
 function guessProv(name,text){
   const z=String(name).replace(/\.(pdf|png|jpe?g)$/i,"");
+  for(const a of Object.keys(PROV_ALIAS)) if(z.includes(a)) return PROV_ALIAS[a];
   for(const p of PROVS){ const pk=p.replace(/\s*\(.*\)/,""); if(pk.length>=2&&z.includes(pk)) return p; }
   if(text){
     const m=text.match(/国网([\u4e00-\u9fa5]{2,4})(?:省|市|自治区)?电力/);
