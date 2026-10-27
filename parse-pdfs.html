@@ -331,7 +331,7 @@ function parseAnnouncement(items,opt){
   if(!Object.keys(dg).length) warns.push("输配电价查询表无此省："+prov);
   if(!Object.keys(dg).length) for(const t of TIERS) dg[t]=null;
 
-  const rawTier=[], seenRow=new Set();
+  const rawTier=[], seenRow=new Set(), orphans=[];
   for(let i=0;i<rows.length;i++){
     const r=rows[i]; let txt=r.text, used=r;
     if(voltRank(txt)===null){
@@ -349,7 +349,13 @@ function parseAnnouncement(items,opt){
       }
       if(hr.size===1) vr=[...hr][0];
     }
-    if(vr===null||vr===0) continue;
+    if(vr===null||vr===0){
+      /* 合并格标量行（无电压等级标签，如浙江 y=243 的系统运行费、y=284 的代理价/线损/基金）。
+         这类行的数字适用于所在区块的所有档位，先收集起来，主流程失败时兜底广播 */
+      const ns=(used.nums||[]).filter(n=>n.v>-0.31&&n.v<0.99);
+      if(ns.length) orphans.push({row:used,y:used.y,p:used.p||1,nums:used.nums});
+      continue;
+    }
     if(used.nums.length<3||seenRow.has(used)) continue;
     seenRow.add(used); rawTier.push({row:used,rank:vr});
   }
@@ -399,7 +405,7 @@ function parseAnnouncement(items,opt){
   /* 云南等省：公告电价表的「代理购电用户电价」列不含系统运行费（与信息公开表口径一致），
      平段−输配电价=代理+线损+基金，四项恒等式不成立，K 不能用于求解/校正 */
   const noXitongTab=TABLE_NO_XITONG[prov]===true;
-  const K=(Kc&&!noXitongTab)?Kc.k:null;
+  let K=(Kc&&!noXitongTab)?Kc.k:null;
   if(K==null&&!noXitongTab) warns.push("未定位到平段电价列，四项需人工确认");
 
   const prose0=(rows)=>({
@@ -409,8 +415,49 @@ function parseAnnouncement(items,opt){
     jijin:kwInProse(rows,/政府性基金及附加|政府性基金/,"jijin")
   });
   let scalar={}, conf={};
-  const solved=(K!=null)?solveScalars(cols,K,hdr,prior,prose0(rows)):null;
+  let solved=(K!=null)?solveScalars(cols,K,hdr,prior,prose0(rows)):null;
   if(solved) for(const f of SCALARS){ scalar[f]=r6(solved[f].med); conf[f]={src:"列+恒等式", n:solved[f].cnt, ok:true}; }
+  /* 合并格标量行回收（最后兜底，仅在恒等式路线失败时启用）：
+     四个标量在电价表里常是「跨多行合并单元格」，pdf.js 提取后落在无电压标签的
+     独立行上被 rawTier 循环丢弃（浙江系统运行费 0.070583 就单独成行 y=243），
+     → buildColumns 聚不出标量列 → K 定位不到 → 静默回退上月旧值。
+     把紧贴档位区块（|Δy|<100）的孤立行数字广播回每一档的 cells 再解一次。 */
+  if(!solved&&orphans.length&&avail.length){
+    const seenS=new Set(), share=[];
+    for(const o of orphans){
+      let near=null;
+      for(const t of rawTier){
+        if((t.row.p||1)!==o.p) continue;
+        const d=Math.abs(t.row.y-o.y);
+        if(near==null||d<near) near=d;
+      }
+      if(near==null||near>100) continue;
+      for(const n of o.nums){
+        if(!SCALARS.some(f=>inRange(f,n.v))) continue;
+        const kk=r6(n.v);
+        if(seenS.has(kk)) continue;
+        seenS.add(kk); share.push({v:kk,x:n.x,y:o.y,w:0,h:0});
+      }
+    }
+    if(share.length>=2){
+      const tm2={};
+      for(const k of Object.keys(tierMap)) tm2[k]={cells:tierMap[k].cells.concat(share), y:tierMap[k].y, row:tierMap[k].row};
+      const cols2=buildColumns(tm2,avail);
+      const Kc2=noXitongTab?null:findK(cols2,dg,avail,jdDan);
+      if(Kc2&&Kc2.cands&&Kc2.cands.length){
+        let best2=null;
+        for(const c of Kc2.cands){
+          const s4=solveScalars(cols2,c.k,hdr,prior,prose0(rows));
+          if(s4){ s4.__K=c.k; if(!best2||(s4.__sc||0)>(best2.__sc||0)) best2=s4; }
+        }
+        if(best2){
+          solved=best2; K=best2.__K;
+          for(const f of SCALARS){ scalar[f]=r6(best2[f].med); conf[f]={src:"合并格回收",n:best2[f].cnt,ok:false}; }
+          warns.push("标量由合并单元格行回收得到，请重点核对");
+        }
+      }
+    }
+  }
   /* 若档位行取自「1.5倍执行价格」表，只有代理价是 1.5 倍，其余三项同值：
      代理价 ≈ 注释候选 × 1.5 时，改用注释值 */
   let agentFixed=false;
@@ -628,7 +675,10 @@ async function pdfItems(file){
       const ops=await pg.getOperatorList();
       hasImg=ops.fnArray.some(fn=>fn===pdfjsLib.OPS.paintImageXObject||fn===pdfjsLib.OPS.paintJpegXObject||fn===pdfjsLib.OPS.paintImageMaskXObject);
     }catch(e){}
-    if(hasImg&&tp.length<80){
+    /* 触发 OCR 的条件放宽为「有位图」**或「该页完全无文字层」**：
+       河南等省的公告是「纯矢量绘制」的扫描件（1290 条矢量路径、0 字符、0 位图），
+       旧判据 hasImg 恒为 false → 整份提取到 0 项 → 四个标量全部静默回退上月旧值 */
+    if((hasImg||tp.length===0)&&tp.length<80){
       try{
         await ensureTesseract();
         if(typeof Tesseract!=="undefined"){
