@@ -76,8 +76,8 @@ pre.raw{background:#0a1322;border:1px solid var(--line);border-radius:6px;paddin
       · <b>电度输配电价</b>：不再从 PDF 猜，直接取内嵌查询表《全国电网代购价统计表1.xlsx》的「新版输配电价202608」／「老版输配电价」—— 8 月起用新版、7 月及以前用老版，按省 × 8 档分别取值。之前安徽 9 月被解析成 0.364，是因为旧解析器跑到注释行「重大水利工程建设基金 <b>0.364 分钱</b>」里抓了数。<br>
       · <b>代理购电价格 / 线损 / 基金 / 系统运行费</b>：这四项是全省一致的量，在电价表里通常是<b>跨 8 行的合并单元格</b>。解析器按 x 坐标把表聚成列，再用恒等式「平段电价 − 输配电价 = 四项之和」锁定正确的四列；取不到时回退到公告注释段与上月值。<br>
       · <b>综合平段电价</b> = 代理 + 线损 + 输配电价(档) + 基金 + 系统运行费，<b>随档位变化</b>，改任一格自动重算。<br>
-      · 每档右侧显示「表内对上 / 待确认」：绿色表示该档综合平段确实能在公告表格里找到同一个数字。<br>
-      · 扫描件（无文字层）会自动尝试 OCR；失败时也能照着公告手工填。
+      · 每档右侧显示「表内对上 / 待确认」：绿色表示该档综合平段确实能在公告表格里找到同一个数字（云南等省公告平段列不含系统运行费时，自动按「平段+系统运行费」交叉验证）。<br>
+      · <b>逐页 OCR</b>：表格或信息公开表是贴图的 PDF（如云南、扫描件）会逐页自动识别；纯文字注释页直接读文字层。OCR 读不出的格子也能照着公告手工填。
     </div>
   </div>
 
@@ -92,8 +92,8 @@ pre.raw{background:#0a1322;border:1px solid var(--line);border-radius:6px;paddin
 </div>
 
 <script>
-const TIERS = ["单一制10kV", "单一制35kV", "单一制110kV", "单一制220kV", "两部制10kV", "两部制35kV", "两部制110kV", "两部制220kV"];
-const PROVS = ["北京", "天津", "河北南网", "冀北", "山东", "山西", "蒙西", "上海", "江苏", "浙江", "安徽", "福建", "湖北", "河南", "湖南", "江西", "辽宁", "吉林", "黑龙江", "蒙东", "陕西", "甘肃", "青海", "宁夏", "新疆", "重庆", "四川", "广东", "广东 (珠三角 6 市)", "广东 (惠州市)", "广东 (东西两翼)", "广东 (粤北山区)", "广西", "云南", "贵州", "海南"];
+const TIERS = ["单一制10kV","单一制35kV","单一制110kV","单一制220kV","两部制10kV","两部制35kV","两部制110kV","两部制220kV"];
+const PROVS = ["北京","天津","河北南网","冀北","山东","山西","蒙西","上海","江苏","浙江","安徽","福建","湖北","河南","湖南","江西","辽宁","吉林","黑龙江","蒙东","陕西","甘肃","青海","宁夏","新疆","重庆","四川","广东","广东 (珠三角 6 市)","广东 (惠州市)","广东 (东西两翼)","广东 (粤北山区)","广西","云南","贵州","海南"];
 const TG = {"new":{"北京":{"单一制10kV":0.31,"单一制35kV":0.25,"单一制110kV":0.25,"单一制220kV":0.2,"两部制10kV":0.205,"两部制35kV":0.165,"两部制110kV":0.165,"两部制220kV":0.15},"天津":{"单一制10kV":0.2507,"单一制35kV":0.1864,"单一制110kV":0.1534,"单一制220kV":0.1315,"两部制10kV":0.1631,"两部制35kV":0.1402,"两部制110kV":0.1264,"两部制220kV":0.1052},"河北南网":{"单一制10kV":0.19,"单一制35kV":0.165,"单一制110kV":0.14,"单一制220kV":0.115,"两部制10kV":0.1476,"两部制35kV":0.1226,"两部制110kV":0.0976,"两部制220kV":0.0726},"冀北":{"单一制10kV":0.1583,"单一制35kV":0.1363,"单一制110kV":0.1143,"单一制220kV":0.1023,"两部制10kV":0.1365,"两部制35kV":0.1145,"两部制110kV":0.0925,"两部制220kV":0.0705},"山西":{"单一制10kV":0.1472,"单一制35kV":0.1322,"单一制110kV":0.1222,"单一制220kV":0.1172,"两部制10kV":0.104,"两部制35kV":0.074,"两部制110kV":0.049,"两部制220kV":0.029},"蒙东":{"单一制10kV":0.3356,"单一制35kV":0.2499,"单一制110kV":0.1732,"单一制220kV":0.1401,"两部制10kV":0.1346,"两部制35kV":0.108,"两部制110kV":0.087,"两部制220kV":0.0601},"蒙西":{"单一制10kV":0.1289,"单一制35kV":0.1129,"单一制110kV":0.1029,"单一制220kV":0.092,"两部制10kV":0.0787,"两部制35kV":0.0637,"两部制110kV":0.052,"两部制220kV":0.0429},"辽宁":{"单一制10kV":0.2119,"单一制110kV":0.1881,"单一制220kV":0.141,"两部制10kV":0.1053,"两部制110kV":0.084,"两部制220kV":0.0571},"吉林":{"单一制10kV":0.257,"单一制110kV":0.247,"单一制220kV":0.227,"两部制10kV":0.1513,"两部制110kV":0.1213,"两部制220kV":0.1113},"黑龙江":{"单一制10kV":0.2726,"单一制35kV":0.262,"单一制110kV":0.241,"单一制220kV":0.226,"两部制10kV":0.1385,"两部制35kV":0.1171,"两部制110kV":0.1026,"两部制220kV":0.0763},"上海":{"单一制10kV":0.2446,"单一制35kV":0.1989,"单一制110kV":0.1656,"单一制220kV":0.1076,"两部制10kV":0.1623,"两部制35kV":0.1268,"两部制110kV":0.0953,"两部制220kV":0.0851},"江苏":{"单一制10kV":0.2131,"单一制35kV":0.1881,"单一制110kV":0.1621,"单一制220kV":0.1351,"两部制10kV":0.1298,"两部制35kV":0.1048,"两部制110kV":0.0788,"两部制220kV":0.0518},"浙江":{"单一制10kV":0.2114,"单一制35kV":0.17,"单一制110kV":0.15,"单一制220kV":0.135,"两部制10kV":0.125,"两部制35kV":0.0895,"两部制110kV":0.0767,"两部制220kV":0.0663},"安徽":{"单一制10kV":0.1794,"单一制35kV":0.1574,"单一制110kV":0.1344,"单一制220kV":0.1044,"两部制10kV":0.1324,"两部制35kV":0.107,"两部制110kV":0.0809,"两部制220kV":0.0548},"福建":{"单一制10kV":0.1633,"单一制35kV":0.1433,"单一制110kV":0.1233,"单一制220kV":0.0883,"两部制10kV":0.1219,"两部制35kV":0.1019,"两部制110kV":0.0769,"两部制220kV":0.0462},"江西":{"单一制10kV":0.1716,"单一制35kV":0.1516,"单一制110kV":0.1316,"单一制220kV":0.1166,"两部制10kV":0.1485,"两部制35kV":0.1285,"两部制110kV":0.1085,"两部制220kV":0.0935},"山东":{"单一制10kV":0.2231,"单一制35kV":0.2061,"单一制110kV":0.1891,"单一制220kV":0.1721,"两部制10kV":0.14,"两部制35kV":0.123,"两部制110kV":0.106,"两部制220kV":0.089},"河南":{"单一制10kV":0.168,"单一制35kV":0.1412,"单一制110kV":0.1145,"单一制220kV":0.1,"两部制10kV":0.1655,"两部制35kV":0.1392,"两部制110kV":0.1125,"两部制220kV":0.098},"湖北":{"单一制10kV":0.1903,"单一制35kV":0.1703,"单一制110kV":0.1503,"单一制220kV":0.1303,"两部制10kV":0.1263,"两部制35kV":0.1065,"两部制110kV":0.0884,"两部制220kV":0.0694},"湖南":{"单一制10kV":0.2409,"单一制35kV":0.2209,"单一制110kV":0.2009,"单一制220kV":0.1809,"两部制10kV":0.1694,"两部制35kV":0.1394,"两部制110kV":0.1104,"两部制220kV":0.0852},"广东":{"单一制10kV":0.1945,"单一制35kV":0.1519,"单一制110kV":0.1519,"单一制220kV":0.115,"两部制10kV":0.1216,"两部制35kV":0.0964,"两部制110kV":0.0964,"两部制220kV":0.0686},"广西":{"单一制10kV":0.2471,"单一制35kV":0.2296,"单一制110kV":0.1199,"单一制220kV":0.0843,"两部制10kV":0.1476,"两部制35kV":0.1054,"两部制110kV":0.0777,"两部制220kV":0.0293},"海南":{"单一制10kV":0.2324,"单一制35kV":0.2103,"单一制110kV":0.1893,"单一制220kV":0.1748,"两部制10kV":0.1348,"两部制35kV":0.118,"两部制110kV":0.0993,"两部制220kV":0.0702},"重庆":{"单一制10kV":0.2149,"单一制35kV":0.1948,"单一制110kV":0.1796,"单一制220kV":0.1647,"两部制10kV":0.1515,"两部制35kV":0.1256,"两部制110kV":0.1062,"两部制220kV":0.0868},"四川":{"单一制10kV":0.2299,"单一制35kV":0.1992,"单一制110kV":0.1126,"单一制220kV":0.0934,"两部制10kV":0.1391,"两部制35kV":0.1125,"两部制110kV":0.0644,"两部制220kV":0.0466},"贵州":{"单一制10kV":0.2024,"单一制35kV":0.1763,"单一制110kV":0.1458,"单一制220kV":0.108,"两部制10kV":0.1238,"两部制35kV":0.1097,"两部制110kV":0.072,"两部制220kV":0.0468},"云南":{"单一制10kV":0.152,"单一制35kV":0.142,"单一制110kV":0.1305,"单一制220kV":0.1059,"两部制10kV":0.1246,"两部制35kV":0.0995,"两部制110kV":0.0683,"两部制220kV":0.0475},"陕西":{"单一制10kV":0.2082,"单一制35kV":0.1867,"单一制110kV":0.1602,"单一制220kV":0.1482,"两部制10kV":0.1271,"两部制35kV":0.1061,"两部制110kV":0.0861,"两部制220kV":0.0731},"陕西(榆林地区)":{"单一制10kV":0.2082,"单一制35kV":0.1867,"单一制110kV":0.1602,"单一制220kV":0.1482,"两部制10kV":0.1083,"两部制35kV":0.0873,"两部制110kV":0.0673,"两部制220kV":0.0543},"甘肃":{"单一制10kV":0.2745,"单一制35kV":0.2545,"单一制110kV":0.1251,"单一制220kV":0.1134,"两部制10kV":0.1063,"两部制35kV":0.0923,"两部制110kV":0.0799,"两部制220kV":0.0693},"青海":{"单一制10kV":0.1866,"单一制35kV":0.1806,"单一制110kV":0.1133,"单一制220kV":0.1073,"两部制10kV":0.0871,"两部制35kV":0.0811,"两部制110kV":0.0711,"两部制220kV":0.06},"宁夏":{"单一制10kV":0.1631,"单一制35kV":0.1431,"单一制110kV":0.1034,"单一制220kV":0.0763,"两部制10kV":0.0903,"两部制35kV":0.0749,"两部制110kV":0.0567,"两部制220kV":0.0491},"新疆":{"单一制10kV":0.1606,"单一制35kV":0.1566,"单一制110kV":0.1221,"单一制220kV":0.1059,"两部制10kV":0.1202,"两部制35kV":0.1098,"两部制110kV":0.0808,"两部制220kV":0.0485},"广东 (珠三角 6 市)":{"单一制10kV":0.1945,"单一制35kV":0.1519,"单一制110kV":0.1519,"单一制220kV":0.115,"两部制10kV":0.1216,"两部制35kV":0.0964,"两部制110kV":0.0964,"两部制220kV":0.0686},"广东 (惠州市)":{"单一制10kV":0.1719,"单一制35kV":0.1293,"单一制110kV":0.1293,"单一制220kV":0.0924,"两部制10kV":0.099,"两部制35kV":0.0738,"两部制110kV":0.0738,"两部制220kV":0.046},"广东 (东西两翼)":{"单一制10kV":0.1128,"单一制35kV":0.0702,"单一制110kV":0.0702,"单一制220kV":0.0333,"两部制10kV":0.0399,"两部制35kV":0.0147,"两部制110kV":0.0147,"两部制220kV":-0.0131},"广东 (粤北山区)":{"单一制10kV":0.0812,"单一制35kV":0.0386,"单一制110kV":0.0386,"单一制220kV":0.0017,"两部制10kV":0.0083,"两部制35kV":-0.0169,"两部制110kV":-0.0169,"两部制220kV":-0.0447}},"old":{"北京":{"单一制10kV":0.39,"单一制35kV":0.32,"单一制110kV":0.32,"单一制220kV":0.275,"两部制10kV":0.2065,"两部制35kV":0.166,"两部制110kV":0.166,"两部制220kV":0.151},"天津":{"单一制10kV":0.251,"单一制35kV":0.1866,"单一制110kV":0.1536,"单一制220kV":0.1316,"两部制10kV":0.1687,"两部制35kV":0.1456,"两部制110kV":0.1316,"两部制220kV":0.1102},"河北南网":{"单一制10kV":0.175,"单一制35kV":0.155,"单一制110kV":0.155,"单一制220kV":0.155,"两部制10kV":0.1533,"两部制35kV":0.1333,"两部制110kV":0.1133,"两部制220kV":0.0933},"冀北":{"单一制10kV":0.1442,"单一制35kV":0.1282,"两部制10kV":0.1292,"两部制35kV":0.1132,"两部制110kV":0.0972,"两部制220kV":0.0912},"山东":{"单一制10kV":0.2069,"单一制35kV":0.1919,"单一制110kV":0.1919,"单一制220kV":0.1919,"两部制10kV":0.1491,"两部制35kV":0.1341,"两部制110kV":0.1191,"两部制220kV":0.1041},"山西":{"单一制10kV":0.1256,"单一制35kV":0.1106,"两部制10kV":0.104,"两部制35kV":0.074,"两部制110kV":0.049,"两部制220kV":0.029},"蒙西":{"单一制10kV":0.1289,"单一制35kV":0.1139,"两部制10kV":0.0795,"两部制35kV":0.0645,"两部制110kV":0.0525,"两部制220kV":0.0455},"上海":{"单一制10kV":0.2305,"单一制35kV":0.1859,"两部制10kV":0.2039,"两部制35kV":0.1547,"两部制110kV":0.1251,"两部制220kV":0.1127},"江苏":{"单一制10kV":0.2134,"单一制35kV":0.1884,"两部制10kV":0.1357,"两部制35kV":0.1107,"两部制110kV":0.0857,"两部制220kV":0.0597},"浙江":{"单一制10kV":0.2144,"单一制35kV":0.177,"两部制10kV":0.126,"两部制35kV":0.0955,"两部制110kV":0.0791,"两部制220kV":0.0688},"安徽":{"单一制10kV":0.1614,"单一制35kV":0.1414,"两部制10kV":0.1428,"两部制35kV":0.1175,"两部制110kV":0.0924,"两部制220kV":0.0673},"福建":{"单一制10kV":0.1633,"单一制35kV":0.1433,"单一制110kV":0.1233,"单一制220kV":0.1033,"两部制10kV":0.1292,"两部制35kV":0.1092,"两部制110kV":0.0842,"两部制220kV":0.0592},"湖北":{"单一制10kV":0.1903,"单一制35kV":0.1703,"两部制10kV":0.1263,"两部制35kV":0.1065,"两部制110kV":0.0884,"两部制220kV":0.0694},"河南":{"单一制10kV":0.168,"单一制35kV":0.1412,"单一制110kV":0.1145,"单一制220kV":0.1145,"两部制10kV":0.168,"两部制35kV":0.1456,"两部制110kV":0.121,"两部制220kV":0.103},"湖南":{"单一制10kV":0.2358,"单一制35kV":0.2158,"单一制110kV":0.1958,"单一制220kV":0.1958,"两部制10kV":0.1694,"两部制35kV":0.1394,"两部制110kV":0.1104,"两部制220kV":0.0852},"江西":{"单一制10kV":0.1616,"单一制35kV":0.1466,"两部制10kV":0.1505,"两部制35kV":0.1355,"两部制110kV":0.1205,"两部制220kV":0.1105},"辽宁":{"单一制10kV":0.2085,"单一制110kV":0.1875,"两部制10kV":0.1024,"两部制110kV":0.0838,"两部制220kV":0.0571},"吉林":{"两部制10kV":0.1497,"两部制110kV":0.1197,"两部制220kV":0.1097},"黑龙江":{"单一制10kV":0.2726,"单一制35kV":0.2615,"单一制110kV":0.241,"单一制220kV":0.241,"两部制10kV":0.1358,"两部制35kV":0.1144,"两部制110kV":0.1016,"两部制220kV":0.0753},"蒙东":{"单一制10kV":0.3361,"单一制35kV":0.2504,"两部制10kV":0.1483,"两部制35kV":0.1413,"两部制110kV":0.1019,"两部制220kV":0.0789},"陕西":{"单一制10kV":0.2015,"单一制35kV":0.1815,"单一制110kV":0.1565,"两部制10kV":0.1231,"两部制35kV":0.1031,"两部制110kV":0.0831,"两部制220kV":0.0731},"甘肃":{"单一制10kV":0.2765,"单一制35kV":0.2565,"两部制10kV":0.1028,"两部制35kV":0.0888,"两部制110kV":0.0764,"两部制220kV":0.0658},"青海":{"单一制10kV":0.1807,"单一制35kV":0.1756,"两部制10kV":0.0834,"两部制35kV":0.0779,"两部制110kV":0.0677,"两部制220kV":0.0577},"宁夏":{"单一制10kV":0.1646,"单一制35kV":0.1446,"单一制110kV":0.1446,"两部制10kV":0.092,"两部制35kV":0.0769,"两部制110kV":0.06,"两部制220kV":0.0521},"新疆":{"单一制10kV":0.1606,"单一制35kV":0.1566,"单一制110kV":0.1566,"单一制220kV":0.1566,"两部制10kV":0.1204,"两部制35kV":0.11,"两部制110kV":0.0815,"两部制220kV":0.0486},"重庆":{"单一制10kV":0.2121,"单一制35kV":0.1922,"单一制110kV":0.1774,"单一制220kV":0.1774,"两部制10kV":0.1529,"两部制35kV":0.1271,"两部制110kV":0.1078,"两部制220kV":0.0885},"四川":{"单一制10kV":0.2296,"单一制35kV":0.1989,"单一制110kV":0.1989,"单一制220kV":0.1989,"两部制10kV":0.139,"两部制35kV":0.1092,"两部制110kV":0.0669,"两部制220kV":0.0478},"广东":{"单一制10kV":0.1994,"单一制35kV":0.1571,"单一制110kV":0.1571,"两部制10kV":0.126,"两部制35kV":0.1009,"两部制110kV":0.1009,"两部制220kV":0.0732},"广西":{"单一制10kV":0.2562,"单一制35kV":0.2364,"两部制10kV":0.1476,"两部制35kV":0.1054,"两部制110kV":0.0777,"两部制220kV":0.0288},"云南":{"单一制10kV":0.152,"单一制35kV":0.142,"两部制10kV":0.1296,"两部制35kV":0.1045,"两部制110kV":0.0749,"两部制220kV":0.0555},"贵州":{"两部制10kV":0.128,"两部制110kV":0.0777,"两部制220kV":0.0529},"海南":{"单一制10kV":0.2361,"两部制10kV":0.135,"两部制35kV":0.0815,"两部制110kV":0.0798,"两部制220kV":0.07},"广东 (珠三角 5 市)":{"单一制10kV":0.1994,"单一制35kV":0.1571,"单一制110kV":0.1571,"两部制10kV":0.126,"两部制35kV":0.1009,"两部制110kV":0.1009,"两部制220kV":0.0732},"广东 (惠州市)":{"单一制10kV":0.173,"单一制35kV":0.1307,"单一制110kV":0.1307,"两部制10kV":0.0996,"两部制35kV":0.0745,"两部制110kV":0.0745,"两部制220kV":0.0468},"广东 (东西两翼)":{"单一制10kV":0.1139,"单一制35kV":0.0716,"单一制110kV":0.0716,"两部制10kV":0.0405,"两部制35kV":0.0154,"两部制110kV":0.0154,"两部制220kV":-0.0123},"广东 (粤北山区)":{"单一制10kV":0.065,"单一制35kV":0.0227,"单一制110kV":0.0227,"两部制10kV":-0.0084,"两部制35kV":-0.0335,"两部制110kV":-0.0335,"两部制220kV":-0.0612}}};
 const MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const SCALARS = ["agent","xiansun","jijin","xitong"];
@@ -136,7 +136,7 @@ function buildRows(items,scale){
 }
 function voltRank(text){
   const t=" "+text.replace(/\s+/g," ")+" ";
-  const q=t.replace(/\s+/g,"");            /* OCR 词间空格：千 伏 → 千伏 */
+  const q=t.replace(/\s+/g,"").replace(/千优/g,"千伏").replace(/干伏/g,"千伏").replace(/F4R/g,"千伏");
   if(/不满\s*1\s*千\s*伏/.test(q)) return 0;
   if(/220千伏|22〇千伏/.test(q)) return 4;
   if(/110千伏/.test(q)) return 3;
@@ -144,9 +144,13 @@ function voltRank(text){
   if(/1710千伏|1>10千伏|1?10千伏/.test(q)) return 1;          /* OCR 变体：1710 / 1>10 / 1?10 */
   if(/[^0-9]10(?:[（(]\s*20\s*[)）])?千伏/.test(q)) return 1;
   if(/35千伏/.test(q)) return 2;
+  if(/(?:^|[^0-9])2光伏/.test(q)) return 4;   /* OCR 变体：220千伏 → 「2光伏」 */
   return null;
 }
 const RANK_NAME={0:"不满1千伏",1:"10kV",2:"35kV",3:"110kV",4:"220kV"};
+/* 这些省公告电价表的平段列不含系统运行费（与该省信息公开表口径一致）：
+   「综合平段=四项+输配电价」的恒等式在其中不成立，标量只能走信息公开表/注释，禁用恒等式求解与校正 */
+const TABLE_NO_XITONG={"云南":true};
 
 function findHeaderXs(items,tierRows){
   if(!tierRows.length) return null;
@@ -274,7 +278,7 @@ function kwInProse(rows,re,f){
         const mm=tok.match(/-?\d+\.\d+/);
         if(!mm) continue;
         const n=parseFloat(mm[0]);
-        if(inRange(f,n)){ const k=n.toFixed(5); cnt.set(k,(cnt.get(k)||0)+1); }
+        if(inRange(f,n)){ const k=n.toFixed(6); cnt.set(k,(cnt.get(k)||0)+1); }
       }
       if(cnt.size>20) break;
     }
@@ -316,6 +320,14 @@ function parseAnnouncement(items,opt){
   const table=(parseInt(month)>=8)?TG.new:TG.old;
   const lookup=(table&&table[prov])||null;
 
+  /* 逐行判定制式（不再按区块切分——各省表格电压有升有降，区块切分不可靠）：
+     ① 行内文本带「两部制/单一制」 ② 行内出现该档输配电价数值（与查表值吻合）
+     ③ 行左侧竖排/横排标签 ④ 继承同一页上一行 */
+  const dg={};
+  for(const t of TIERS) if(lookup&&lookup[t]!=null) dg[t]=lookup[t];
+  if(!Object.keys(dg).length) warns.push("输配电价查询表无此省："+prov);
+  if(!Object.keys(dg).length) for(const t of TIERS) dg[t]=null;
+
   const rawTier=[], seenRow=new Set();
   for(let i=0;i<rows.length;i++){
     const r=rows[i]; let txt=r.text, used=r;
@@ -324,20 +336,22 @@ function parseAnnouncement(items,opt){
       if(next&&next.y-r.y<15&&voltRank(txt+" "+next.text)!==null){ txt+=" "+next.text; used=next.nums.length>r.nums.length?next:r; }
       else if(prev&&r.y-prev.y<15&&voltRank(prev.text+" "+txt)!==null){ txt=prev.text+" "+txt; used=prev.nums.length>r.nums.length?prev:r; }
     }
-    const vr=voltRank(txt);
+    let vr=voltRank(txt);
+    if(vr===null){
+      /* 查表反推兜底：电压标签 OCR 缺损（如云南「zoTh」=220千伏），但行内恰好有该档输配电价数值 */
+      const hr=new Set();
+      for(let rk=1;rk<=4;rk++) for(const zh of ["两部制","单一制"]){
+        const dv=dg[zh+RANK_NAME[rk]];
+        if(dv!=null&&r.nums.some(n=>Math.abs(n.v-dv)<2e-4)) hr.add(rk);
+      }
+      if(hr.size===1) vr=[...hr][0];
+    }
     if(vr===null||vr===0) continue;
     if(used.nums.length<3||seenRow.has(used)) continue;
     seenRow.add(used); rawTier.push({row:used,rank:vr});
   }
   rawTier.sort((a,b)=>((a.row.p||1)-(b.row.p||1))||(a.row.y-b.row.y));
 
-  /* 逐行判定制式（不再按区块切分——各省表格电压有升有降，区块切分不可靠）：
-     ① 行内文本带「两部制/单一制」 ② 行内出现该档输配电价数值（与查表值吻合）
-     ③ 行左侧竖排/横排标签 ④ 继承同一页上一行 */
-  const dg={};
-  for(const t of TIERS) if(lookup&&lookup[t]!=null) dg[t]=lookup[t];
-  if(!Object.keys(dg).length) warns.push("输配电价查询表无此省："+prov);
-  if(!Object.keys(dg).length) for(const t of TIERS) dg[t]=null;
   const tierMap={};
   let lastZhi=null, lastY=null, lastP=null;
   for(const t of rawTier){
@@ -378,8 +392,11 @@ function parseAnnouncement(items,opt){
   const cols=buildColumns(tierMap,avail);
   const hdr=findHeaderXs(items,rawTier);
   const Kc=findK(cols,dg,avail);
-  const K=Kc?Kc.k:null;
-  if(K==null) warns.push("未定位到平段电价列，四项需人工确认");
+  /* 云南等省：公告电价表的「代理购电用户电价」列不含系统运行费（与信息公开表口径一致），
+     平段−输配电价=代理+线损+基金，四项恒等式不成立，K 不能用于求解/校正 */
+  const noXitongTab=TABLE_NO_XITONG[prov]===true;
+  const K=(Kc&&!noXitongTab)?Kc.k:null;
+  if(K==null&&!noXitongTab) warns.push("未定位到平段电价列，四项需人工确认");
 
   const prose0=(rows)=>({
     agent:kwInProse(rows,/代理工商业购电价格|代理购电价格|代理购电价/,"agent"),
@@ -453,15 +470,36 @@ function parseAnnouncement(items,opt){
     }
   }
 
-  /* 恒等式组合校正：四项之和应等于 K（平段-输配电价），偏差大则在候选池里重新组合 */
+  /* 平段不含系统运行费的省（如云南）：K3 = 平段−输配电价 = 代理+线损+基金，
+     已知其中任意两项即可反解第三项（基金通常无「分钱」明细，只能这样求） */
+  if(Kc!=null&&noXitongTab){
+    const TRI=["agent","xiansun","jijin"];
+    const miss=TRI.find(f=>scalar[f]==null);
+    if(miss&&TRI.filter(f=>f!==miss).every(f=>scalar[f]!=null)){
+      const rv=r6(Kc.k-TRI.filter(f=>f!==miss).reduce((a,f)=>a+scalar[f],0));
+      const rg=RANGE[miss];
+      if(rv>=rg[0]&&rv<=rg[1]){ scalar[miss]=rv; conf[miss]={src:"平段反解(不含系统运行费)",ok:true}; }
+    }
+  }
+
+  /* 恒等式组合校正：四项之和应等于 K（平段-输配电价）。
+     触发条件：① 和≠K  ② 某项与注释候选全不一致 —— 恒等式可能被另一组数字偶然满足
+     （如山东：0.3405−0.0038+0.0119+0.14 也≈K，但真值在注释里），只看和会漏判 */
   if(K!=null&&!agentFixed&&SCALARS.every(f=>scalar[f]!=null)){
     const cur=SCALARS.map(f=>scalar[f]);
     const dev0=Math.abs(cur.reduce((a,b)=>a+b,0)-K);
-    if(dev0>1.5e-3){
+    const misProse=SCALARS.some(f=>{
+      const pr=prose[f];
+      if(!pr||!pr.length) return false;
+      return !pr.some(c=>Math.abs(c.v-scalar[f])<1e-6);
+    });
+    if(dev0>1.5e-3||misProse){
       const pools=SCALARS.map(f=>{
         const set=[];
         if(scalar[f]!=null) set.push({v:scalar[f],w:1});
         for(const c of (prose[f]||[])) if(!set.some(x=>Math.abs(x.v-c.v)<1e-9)) set.push({v:c.v,w:0});
+        /* 「分钱」求和的基金常不在表内列里（山东等），必须进候选池 */
+        if(f==="jijin"&&jf&&jf.n>=2&&!set.some(x=>Math.abs(x.v-jf.v)<1e-9)) set.push({v:jf.v,w:0.5});
         if(prior&&prior[f]!=null&&!set.some(x=>Math.abs(x.v-prior[f])<1e-9)) set.push({v:prior[f],w:0});
         const others=SCALARS.filter(g=>g!==f);
         if(others.every(g=>scalar[g]!=null)){
@@ -505,6 +543,15 @@ function parseAnnouncement(items,opt){
     const z=rec[t].zonghe_dg;
     hit[t]= z!=null && tierMap[t].cells.some(c=>Math.abs(c.v-z)<0.0018);
   }
+  /* 平段列不含系统运行费的省（如云南）：直接对不上是正常的，
+     改用「平段+系统运行费」与表内数值交叉验证，多数档都对上时视为已核对 */
+  if(avail.length&&SCALARS.every(f=>scalar[f]!=null)&&Object.values(hit).filter(Boolean).length<Math.ceil(avail.length*0.5)){
+    const noX=avail.filter(t=>rec[t].zonghe_dg!=null&&tierMap[t].cells.some(c=>Math.abs(c.v-r6(rec[t].zonghe_dg-scalar.xitong))<0.0018));
+    if(noX.length>=Math.max(2,Math.ceil(avail.length*0.6))){
+      for(const t of noX) hit[t]=true;
+      warns.push("该省公告平段列不含系统运行费，已按「平段+系统运行费」与表内数值交叉验证一致");
+    }
+  }
   return {rec,dg,scalar,conf,K,warns,tiersFound:Object.keys(tierMap),hit};
 }
 
@@ -546,37 +593,56 @@ async function pdfItems(file){
   if(!ok) throw new Error("pdf.js 未加载（请检查网络）");
   const buf=await file.arrayBuffer();
   const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
-  const items=[];
-  let textCount=0;
+  const pageTextItems=[]; let textCount=0;
   for(let i=1;i<=doc.numPages;i++){
     const page=await doc.getPage(i);
     const tc=await page.getTextContent();
     const vp=page.getViewport({scale:1});
+    const arr=[];
     for(const it of tc.items){
       if(!it.str||!it.str.trim()) continue;
       textCount++;
       const t=it.transform;
-      items.push({p:i,s:it.str.trim(),x:Math.round(t[4]*10)/10,y:Math.round((vp.height-t[5])*10)/10,
-                  w:Math.round((it.width||0)*10)/10,h:Math.round((it.height||0)*10)/10});
+      arr.push({p:i,s:it.str.trim(),x:Math.round(t[4]*10)/10,y:Math.round((vp.height-t[5])*10)/10,
+                w:Math.round((it.width||0)*10)/10,h:Math.round((it.height||0)*10)/10});
     }
+    pageTextItems[i]=arr;
   }
-  /* 扫描版 PDF（无文字层）：渲染成图片走 OCR */
-  if(textCount<15){
-    if(typeof ensureTesseract==="function") await ensureTesseract();
-    if(typeof Tesseract==="undefined") throw new Error("扫描版 PDF 需要 OCR，但引擎未加载成功");
-    for(let i=1;i<=Math.min(doc.numPages,3);i++){
-      const page=await doc.getPage(i);
-      const vp=page.getViewport({scale:2});
-      const cv=document.createElement("canvas"); cv.width=vp.width; cv.height=vp.height;
-      await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
-      const id=cv.getContext("2d").getImageData(0,0,cv.width,cv.height);
-      cleanCanvas(id.data,cv.width,cv.height);
-      cv.getContext("2d").putImageData(id,0,0);
-      const out=await Tesseract.recognize(cv,"chi_sim+eng",{logger:()=>{}});
-      items.push(...ocrWordsToItems(out.data.words||[],2).map(it=>({...it,p:i})));
+  /* 逐页判断：表格/信息公开表是贴图（页内有大图、文字层稀疏）→ 该页渲染走 OCR。
+     云南等省「电价表+信息公开表」是图片、注释页是文字层，整份文字数很多，
+     旧版「总文字数<15 才 OCR」会整份漏掉 */
+  const items=[];
+  for(let i=1;i<=doc.numPages;i++){
+    const tp=pageTextItems[i]||[];
+    let hasImg=false;
+    try{
+      const ops=await doc.getPage(i).getOperatorList();
+      hasImg=ops.fnArray.some(fn=>fn===pdfjsLib.OPS.paintImageXObject||fn===pdfjsLib.OPS.paintJpegXObject||fn===pdfjsLib.OPS.paintImageMaskXObject);
+    }catch(e){}
+    if(hasImg&&tp.length<80){
+      try{
+        await ensureTesseract();
+        if(typeof Tesseract!=="undefined"){
+          const ocr=await ocrPdfPage(doc,i);
+          const numCnt=a=>a.filter(x=>/\d/.test(String(x.s||""))).length;
+          if(numCnt(ocr)>numCnt(tp)+2||tp.length<15){ items.push(...ocr); continue; }
+        }
+      }catch(e){ /* OCR 失败则保留文字层 */ }
     }
+    items.push(...tp);
   }
   return {items,pages:doc.numPages};
+}
+async function ocrPdfPage(doc,i){
+  const page=await doc.getPage(i);
+  const vp=page.getViewport({scale:2});
+  const cv=document.createElement("canvas"); cv.width=vp.width; cv.height=vp.height;
+  await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
+  const id=cv.getContext("2d").getImageData(0,0,cv.width,cv.height);
+  cleanCanvas(id.data,cv.width,cv.height);
+  cv.getContext("2d").putImageData(id,0,0);
+  const out=await Tesseract.recognize(cv,"chi_sim+eng",{logger:()=>{}});
+  return ocrWordsToItems(out.data.words||[],2).map(it=>({...it,p:i}));
 }
 const OCR_CDNS=["https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js",
   "https://fastly.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js",
