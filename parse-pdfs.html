@@ -624,7 +624,8 @@ async function pdfItems(file){
     const tp=pageTextItems[i]||[];
     let hasImg=false;
     try{
-      const ops=await doc.getPage(i).getOperatorList();
+      const pg=await doc.getPage(i);          /* 先 await 页对象：doc.getPage(i) 是 Promise，直接 .getOperatorList 会 TypeError */
+      const ops=await pg.getOperatorList();
       hasImg=ops.fnArray.some(fn=>fn===pdfjsLib.OPS.paintImageXObject||fn===pdfjsLib.OPS.paintJpegXObject||fn===pdfjsLib.OPS.paintImageMaskXObject);
     }catch(e){}
     if(hasImg&&tp.length<80){
@@ -794,8 +795,10 @@ function renderCards(){
   const box=$("#cards"); box.innerHTML="";
   cards.forEach(c=>{
     const el=document.createElement("div"); el.className="card";
-    const miss=TIERS.some(t=>c.rec[t].zonghe_dg==null);
-    const okAll=!miss && !c.warns.length && TIERS.every(t=>c.hit[t]);
+    /* 查表无此档（如吉林/辽宁用66千伏、无35kV）的档位不算缺失，标注「公告无此档」 */
+    const noTier=t=>c.rec[t].dg==null;
+    const miss=TIERS.some(t=>!noTier(t)&&c.rec[t].zonghe_dg==null);
+    const okAll=!miss && !c.warns.length && TIERS.every(t=>noTier(t)||c.hit[t]);
     el.classList.add(okAll?"ok":"bad");
     const head=document.createElement("div"); head.className="card-hd";
     head.innerHTML=
@@ -813,7 +816,7 @@ function renderCards(){
         ["agent","xiansun","dg","jijin","xitong"].map(k=>
           '<td><input data-t="'+t+'" data-k="'+k+'" class="'+(k==="dg"?"dg":"")+'" value="'+(r[k]==null?"":r[k])+'"></td>').join("")+
         '<td><input class="zh" value="'+(r.zonghe_dg==null?"":r.zonghe_dg)+'" readonly></td>'+
-        '<td style="text-align:left">'+(c.hit[t]?'<span class="tag ok">表内对上</span>':'<span class="tag">待确认</span>')+'</td></tr>';
+        '<td style="text-align:left">'+(noTier(t)?'<span class="tag">公告无此档</span>':(c.hit[t]?'<span class="tag ok">表内对上</span>':'<span class="tag">待确认</span>'))+'</td></tr>';
     });
     html+='</tbody></table>';
     tb.innerHTML=html;
