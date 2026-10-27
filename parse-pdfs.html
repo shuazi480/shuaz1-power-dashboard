@@ -151,6 +151,9 @@ const RANK_NAME={0:"不满1千伏",1:"10kV",2:"35kV",3:"110kV",4:"220kV"};
 /* 这些省公告电价表的平段列不含系统运行费（与该省信息公开表口径一致）：
    「综合平段=四项+输配电价」的恒等式在其中不成立，标量只能走信息公开表/注释，禁用恒等式求解与校正 */
 const TABLE_NO_XITONG={"云南":true};
+/* 单一制（其他用电）政府性基金 比 两部制 高出部分。广西公告：「农网还贷资金，其中：两部制用电1.5分钱，其他各类用电2.5分钱」→ 高 0.01。
+   2026-10-27 全量扫描 92 份有文字层公告，全国仅广西存在该差异。 */
+const JIJIN_DAN_DELTA={"广西":0.01};
 
 function findHeaderXs(items,tierRows){
   if(!tierRows.length) return null;
@@ -198,11 +201,11 @@ function buildColumns(tierMap,avail){
   }
   return cols.filter(c=>c.cnt>=1);
 }
-function findK(cols,dg,avail){
+function findK(cols,dg,avail,delta){
   const cands=[];
   for(const col of cols){
     const ks=[];
-    for(const t of avail){ const v=col.vals[t]; if(v==null) continue; ks.push(v-dg[t]); }
+    for(const t of avail){ const v=col.vals[t]; if(v==null) continue; ks.push(v-dg[t]-(t.indexOf("单一制")===0?(delta||0):0)); }
     if(ks.length<Math.max(2,Math.ceil(avail.length*0.6))) continue;
     const med=median(ks);
     if(med<0.05||med>1.25) continue;
@@ -391,7 +394,8 @@ function parseAnnouncement(items,opt){
 
   const cols=buildColumns(tierMap,avail);
   const hdr=findHeaderXs(items,rawTier);
-  const Kc=findK(cols,dg,avail);
+  const jdDan=JIJIN_DAN_DELTA[prov]||0;   /* 单一制基金比两部制高出的部分 */
+  const Kc=findK(cols,dg,avail,jdDan);
   /* 云南等省：公告电价表的「代理购电用户电价」列不含系统运行费（与信息公开表口径一致），
      平段−输配电价=代理+线损+基金，四项恒等式不成立，K 不能用于求解/校正 */
   const noXitongTab=TABLE_NO_XITONG[prov]===true;
@@ -525,18 +529,22 @@ function parseAnnouncement(items,opt){
       };
       rec(0,0,[]);
       if(best&&best.d<8e-4){
+        const before=SCALARS.map(f=>scalar[f]);
         SCALARS.forEach((f,i)=>{ scalar[f]=r6(best.pick[i]); conf[f]={src:"恒等式组合校正",ok:true}; });
-        warns.push("四项之和与平段恒等式不符，已按恒等式重新组合，请核对");
+        /* 组合结果与原值一致时不要报「已重新组合」，避免误导用户去核对 */
+        const changed=SCALARS.some((f,i)=>Math.abs((scalar[f]==null?0:scalar[f])-(before[i]==null?0:before[i]))>1e-9);
+        if(changed) warns.push("四项之和与平段恒等式不符，已按恒等式重新组合，请核对");
       }
     }
   }
 
   const rec={};
   for(const t of TIERS){
+    const jd=(t.indexOf("单一制")===0?jdDan:0);   /* 单一制档位基金要加回差额 */
     rec[t]={agent:scalar.agent!=null?scalar.agent:null, xiansun:scalar.xiansun!=null?scalar.xiansun:null,
-            dg:dg[t]!=null?dg[t]:null, jijin:scalar.jijin!=null?scalar.jijin:null,
+            dg:dg[t]!=null?dg[t]:null, jijin:scalar.jijin!=null?r6(scalar.jijin+jd):null,
             xitong:scalar.xitong!=null?scalar.xitong:null, zonghe_dg:null};
-    if(dg[t]!=null&&SCALARS.every(f=>scalar[f]!=null)) rec[t].zonghe_dg=r6(SCALARS.reduce((a,f)=>a+scalar[f],0)+dg[t]);
+    if(dg[t]!=null&&SCALARS.every(f=>scalar[f]!=null)) rec[t].zonghe_dg=r6(SCALARS.reduce((a,f)=>a+scalar[f],0)+dg[t]+jd);
   }
   const hit={};
   for(const t of avail){
@@ -552,7 +560,7 @@ function parseAnnouncement(items,opt){
       warns.push("该省公告平段列不含系统运行费，已按「平段+系统运行费」与表内数值交叉验证一致");
     }
   }
-  return {rec,dg,scalar,conf,K,warns,tiersFound:Object.keys(tierMap),hit};
+  return {rec,dg,scalar,conf,K,warns,tiersFound:Object.keys(tierMap),hit,_cols:cols,_tierMap:tierMap};
 }
 
 const PROV_ALIAS={"河北省":"河北南网","河北":"河北南网","内蒙古东部":"蒙东","内蒙古西部":"蒙西","蒙东电力":"蒙东"};
