@@ -90,6 +90,10 @@ pre.raw{background:#0a1322;border:1px solid var(--line);border-radius:6px;paddin
     <button class="btn" id="btnHtml">下载离线仪表盘 HTML</button>
     <span class="hint" id="applyMsg"></span>
   </div>
+
+  <div class="row" id="fileStat" style="display:none;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px">
+    <span style="font-size:14px" id="fileStatTxt"></span>
+  </div>
 </div>
 
 <script>
@@ -1000,14 +1004,39 @@ function relookup(c){
   for(const t of TIERS) c.rec[t].dg=(lk&&lk[t]!=null)?lk[t]:null;
   recalc(c);
 }
+/* 查表无此档（如吉林/辽宁用 66 千伏、无 35kV）的档位不算缺失 */
+function cardOk(c){
+  const noTier=t=>c.rec[t].dg==null;
+  const miss=TIERS.some(t=>!noTier(t)&&c.rec[t].zonghe_dg==null);
+  return !miss && !c.warns.length && TIERS.every(t=>noTier(t)||c.hit[t]);
+}
+/* 页面底部统计：共解析多少份，按 PDF / 图片分类 */
+function updateFileStat(){
+  const el=$("#fileStat"); if(!el) return;
+  let pdf=0,img=0,other=0;
+  for(const c of cards){
+    const n=String(c.name||"").toLowerCase();
+    if(/\.pdf$/.test(n)) pdf++;
+    else if(/\.(png|jpe?g)$/.test(n)) img++;
+    else other++;
+  }
+  const total=cards.length;
+  el.style.display=total?"flex":"none";
+  if(!total){ $("#fileStatTxt").textContent=""; return; }
+  const okN=cards.filter(cardOk).length, badN=total-okN;
+  let txt="共解析 "+total+" 份：PDF "+pdf+" 份、图片（PNG/JPG）"+img+" 份";
+  if(other) txt+="、手动新增 "+other+" 份";
+  txt+="　｜　解析可信 <b style=\"color:var(--ok)\">"+okN+"</b> 份 · 需核对 <b style=\"color:var(--warn)\">"+badN+"</b> 份";
+  $("#fileStatTxt").innerHTML=txt;
+}
+
 function renderCards(){
   const box=$("#cards"); box.innerHTML="";
   cards.forEach(c=>{
     const el=document.createElement("div"); el.className="card";
     /* 查表无此档（如吉林/辽宁用66千伏、无35kV）的档位不算缺失，标注「公告无此档」 */
     const noTier=t=>c.rec[t].dg==null;
-    const miss=TIERS.some(t=>!noTier(t)&&c.rec[t].zonghe_dg==null);
-    const okAll=!miss && !c.warns.length && TIERS.every(t=>noTier(t)||c.hit[t]);
+    const okAll=cardOk(c);
     el.classList.add(okAll?"ok":"bad");
     const head=document.createElement("div"); head.className="card-hd";
     head.innerHTML=
@@ -1062,6 +1091,7 @@ function renderCards(){
     });  });
   $("#actions").style.display=cards.length?"flex":"none";
   $("#stat").textContent="共 "+cards.length+" 个省份/月份待应用";
+  updateFileStat();
 }
 
 async function handleFile(file){
