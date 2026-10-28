@@ -903,16 +903,27 @@ async function pdfItems(file){
   }
   return {items,pages:doc.numPages};
 }
+/* 扫描件 PDF 逐页 OCR。
+   ⚠️ 渲染分辨率必须自适应：固定 scale=2（144 DPI）会把高清扫描件（源图常 3000~4000px 宽）
+   压到 600px 左右，中文电价表的数字大量粘连，OCR 出来是乱码（河北南网 10 月实测：
+   144 DPI 只出 463 词且「未识别到电压等级表」，改到 2000px 宽后出 2169 词、表也认出来了）。
+   做法：按页面宽度算 scale，让渲染宽度 ≈ OCR_TARGET_W；再用像素总量上限兜底，
+   避免超大页面把 WASM 拖死（超过上限就逐步降 scale，最低不回到 144 DPI 以下）。 */
+const OCR_TARGET_W=2000, OCR_MAX_PX=14e6, OCR_MAX_SC=8;
 async function ocrPdfPage(doc,i){
   const page=await doc.getPage(i);
-  const vp=page.getViewport({scale:2});
+  const base=page.getViewport({scale:1});
+  let sc=Math.max(2,Math.min(OCR_MAX_SC,OCR_TARGET_W/Math.max(base.width,1)));
+  const pxAt=s=>{const v=page.getViewport({scale:s});return v.width*v.height;};
+  while(sc>2&&pxAt(sc)>OCR_MAX_PX) sc=Math.max(2,sc*0.8);
+  const vp=page.getViewport({scale:sc});
   const cv=document.createElement("canvas"); cv.width=vp.width; cv.height=vp.height;
   await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
   const id=cv.getContext("2d").getImageData(0,0,cv.width,cv.height);
   cleanCanvas(id.data,cv.width,cv.height);
   cv.getContext("2d").putImageData(id,0,0);
   const out=await Tesseract.recognize(cv,"chi_sim+eng",{logger:()=>{}});
-  return ocrWordsToItems(out.data.words||[],2).map(it=>({...it,p:i}));
+  return ocrWordsToItems(out.data.words||[],sc).map(it=>({...it,p:i}));
 }
 const OCR_CDNS=["https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js",
   "https://fastly.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js",
