@@ -361,6 +361,44 @@ function kwInProse(rows,re,f){
   }
   return [...cnt.entries()].map(e=>({v:r6(parseFloat(e[0])),s:2+Math.min(e[1],4)})).sort((a,b)=>b.s-a.s).slice(0,8);
 }
+/* 汇总表格式（山西/湖北/湖南等「代理购电价格信息表」：无电压档电价表，只有 15 行明细）。
+   OCR 错字多（线损→线吉、费用→员用），关键词匹配常失败 → 改用结构锚定：
+   「购电价格」行=agent（含平均/偏差的排除），「线…折价」=xiansun，「系统运行」=xitong，
+   「平均购电价格/上网电价」与「偏差」行用于交叉验证 agent=平均+偏差。
+   数值取行内唯一电价量级的小数（计算关系式 8=9+10… 是整数不会被取到）。 */
+function sumTable(rows){
+  const out={agent:[],xiansun:[],xitong:[],jijin:[]};
+  const pickNum=r=>{
+    const ns=r.nums.filter(n=>Math.abs(n.v)>0.005&&Math.abs(n.v)<1.2);
+    return ns.length?r6(ns[ns.length-1].v):null;
+  };
+  let avg=null,dev=null;
+  for(const r of rows){
+    if(!r.nums.length) continue;
+    if(voltRank(r.text)!==null) continue;
+    const t=String(r.text).replace(/\s+/g,"");
+    const v=pickNum(r);
+    if(v==null) continue;
+    /* 「购电价格」OCR 常错字（惟格），锚「购电+价/格」并排除电量行、倍价行、备注行；
+       「、」排除注释里的顿号列举句（河南「注1.电网企业代理购电工商业用户电价由…」曾被当成 agent=1） */
+    if(/购电/.test(t)&&/价|格/.test(t)&&!/平均|偏差|电量|规模|倍|备注|补贴|、/.test(t)&&!/^注/.test(t)&&v>0.05&&v<1.1) out.agent.push({v,s:10});
+    else if(/平均/.test(t)&&/购电价格|上网电价/.test(t)) avg=v;
+    else if(/偏差/.test(t)&&v>-0.15&&v<0.15) dev=v;
+    if(/线/.test(t)&&/折价/.test(t)&&!/偏差|损益/.test(t)&&v>0.002&&v<0.1) out.xiansun.push({v,s:10});
+    if(/系统运行/.test(t)&&!/市场运营/.test(t)&&v>-0.3&&v<0.35) out.xitong.push({v,s:10});
+    /* 计算关系锚：系统运行费行恒为「N=a+b+c+…（≥3 个加数）」，中文全被 OCR 认错时仍能锚定
+       （购电价格 4=5+6、电量 1=2+3 只有 2 个加数不会误中） */
+    if(/(\d+)\s*[-=＋+]\s*\d+\s*[+＋]\s*\d+\s*[+＋]\s*\d+/.test(t)&&v>-0.3&&v<0.35) out.xitong.push({v,s:9});
+    if(/政府性基金/.test(t)&&v>0.005&&v<0.12) out.jijin.push({v,s:10});
+  }
+  /* 交叉验证：代理价 ≈ 平均 + 历史偏差（±2e-4）时才信任 agent 候选 */
+  if(avg!=null&&dev!=null){
+    const ok=cands=>cands.filter(c=>Math.abs(c.v-avg-dev)<2e-4||Math.abs(c.v-Math.abs(avg+dev))<2e-4);
+    if(out.agent.length&&ok(out.agent).length) out.agent=ok(out.agent).map(c=>({v:c.v,s:12}));
+  }
+  for(const k of Object.keys(out)) out[k]=out[k].sort((a,b)=>b.s-a.s).slice(0,4);
+  return out;
+}
 const FEN_ITEMS=/(重大水利工程建设基金|国家重大水利工程建设基金|大中型水库移民后期扶持资金|大中型水库移民后期扶持基金|中型水库移民后期扶持资金|水库移民后期扶持资金|水库移民后期扶持基金|可再生能源电价附加|农网还贷资[金企]|农网还贷资金|地方水利建设基金|地方水库移民扶助基金|地方水库移民扶持基金|小型水库移民扶助基金)/g;
 function jijinFen(rows){
   /* 每页拼成整段文本再去掉空白：注释里「分钱」明细常跨行（如「可再生能/源电价附加 1.9 分钱」），
@@ -507,6 +545,14 @@ function parseAnnouncement(items,opt){
     }
   }
   const prose=prose0(rows);
+  /* 汇总表格式（无电压档表）候选：权重 10~12。识别到电压档表时降为低权重兜底
+     （防「1.5倍代理购电」等词误触发；也防汇总表的偏差值 0.02894 撞上输配电价 0.029
+     被 dg 反推误判成档位行后 sumTable 被整体禁用——山西9月案例） */
+  const st=sumTable(rows);
+  for(const f of SCALARS){
+    if(!st[f]||!st[f].length) continue;
+    prose[f]=avail.length?[...(prose[f]||[]),...st[f].map(c=>({v:c.v,s:3}))]:[...st[f],...(prose[f]||[])];
+  }
   const jf=jijinFen(rows);
   /* 注释里的「平均上网电价/当月平均购电价格 X、历史偏差电费折价 Y」→ 代理价 = X+Y */
   const sumNote=(()=>{
@@ -585,11 +631,23 @@ function parseAnnouncement(items,opt){
         if(near==null||d<near) near=d;
       }
       if(near==null||near>120) continue;
+      /* OCR 丢小数点变体：纯数字 6~9 位整数（首位任意）可能是「0.xxxxxx」丢点+丢前导 0，
+         如河南8月标量行 451405=0.451405、028889375=0.028889375。仅当行内 ≥3 个该形态
+         （真正的标量行四个数全是）才启用，避免把电量「27955020」这类大数误转成电价 */
+      const raw6=(o.row.items||[]).filter(i=>/^\d{6,9}$/.test(String(i.s).replace(/,/g,"")));
+      const allow6=raw6.length>=3;
       for(const n of o.nums){
         if(!SCALARS.some(f=>inRange(f,n.v))) continue;
         const kk=r6(n.v);
         if(seenS.has(kk)) continue;
         seenS.add(kk); share.push({v:kk,x:n.x,y:o.y,w:0,h:0});
+      }
+      if(allow6) for(const it of raw6){
+        const v2=parseFloat("0."+String(it.s).replace(/,/g,""));
+        if(!SCALARS.some(f=>inRange(f,v2))) continue;
+        const kk=r6(v2);
+        if(seenS.has(kk)) continue;
+        seenS.add(kk); share.push({v:kk,x:it.x,y:o.y,w:0,h:0});
       }
     }
     if(share.length>=2){
@@ -793,8 +851,10 @@ async function pdfItems(file){
       }catch(e){ /* OCR 失败则保留文字层 */ }
     }
     /* 整页曲线字（文字全部转曲）：无图、无文字层、但有几千条曲线 → 必须 OCR，
-       否则像河南202610 这种公告会整页空手而归 */
-    if(!hasImg&&tp.length===0){
+       否则像河南202610 这种公告会整页空手而归。
+       变体（河南202608/09）：正文是文字层（标题+说明段），但电价表是转曲的——
+       文字层里几乎没有「0.xxxx」电价形态的小数，drawCnt 却几千 → 同样整页 OCR */
+    if(!hasImg&&tp.length<150){
       let drawCnt=0;
       try{
         const pg=await doc.getPage(i);
@@ -802,13 +862,19 @@ async function pdfItems(file){
         drawCnt=ops.fnArray.filter(fn=>fn===pdfjsLib.OPS.curveTo||fn===pdfjsLib.OPS.constructPath).length;
       }catch(e){}
       if(drawCnt>800){
-        try{
-          await ensureTesseract();
-          if(typeof Tesseract!=="undefined"){
-            const ocr=await ocrPdfPage(doc,i);
-            if(ocr.length){ items.push(...ocr); continue; }
-          }
-        }catch(e){}
+        /* 电价形态小数：正常文字层电价表会有几十个；只有正文时几乎为 0 */
+        const numDec=tp.filter(x=>/\d\.\d{4,}/.test(String(x.s))).length;
+        const needOcr=(tp.length===0)||numDec<8;
+        if(needOcr){
+          try{
+            await ensureTesseract();
+            if(typeof Tesseract!=="undefined"){
+              const ocr=await ocrPdfPage(doc,i);
+              const numCnt=a=>a.filter(x=>/\d/.test(String(x.s||""))).length;
+              if(ocr.length&&(tp.length===0||numCnt(ocr)>numCnt(tp))){ items.push(...ocr); continue; }
+            }
+          }catch(e){ /* OCR 失败则保留文字层 */ }
+        }
       }
     }
     items.push(...tp);
@@ -873,7 +939,11 @@ function cleanCanvas(data,w,h){
    它紧跟在前一个数小数部分的最后一位之后。切法：从第二个「.」起，向前让出 1 位当作下一个数的
    整数位（该位本来也是 0，对前一个数而言就是无害的末位 0）。不适用时返回 null。 */
 function splitGlued(s){
-  if(!/^-?[\d.]+$/.test(s)) return null;
+  s=String(s).replace(/[^\d.\-]/g,"");          /* 粘连词尾部常带 OCR 杂字符（如「…0.335:」） */
+  if(!/^[\d.\-]+$/.test(s)||!s) return null;
+  /* 变体（河南202608）：第一个数丢了小数点——「0288893750.0370291.225…」，
+     开头是 6~9 位无点数紧跟着 0.x，补上「0.」前缀即可按常规形态切分 */
+  if(/^\d{6,9}(?=0\.\d)/.test(s)) s="0."+s;
   const dots=[]; for(let i=0;i<s.length;i++) if(s[i]===".") dots.push(i);
   if(dots.length<2) return null;
   let st0=0, neg=false;
@@ -913,7 +983,7 @@ function ocrWordsToItems(words,scaleDiv){
        .replace(/[，]/g,"，").replace(/[．]/g,".");
     t=t.replace(/^(\d{1,3}),(\d{6,})$/,"$1.$2");   /* 「0,02353800」→「0.02353800」 OCR 把小数点读成逗号（千位分隔符逗号后恒为 3 位，不会误伤） */
     t=t.replace(/(^|[^\d.])\.(\d+)/g,"$10.$2");   /* 「《.613091」→「0.613091」 */
-    t=t.replace(/(^|[^\d.])0(\d{6})(?![\d.])/g,"$10.$2");  /* 「0139400」→「0.139400」 OCR 丢小数点 */
+    t=t.replace(/(^|[^\d.])0(\d{6,8})(?![\d.])/g,"$10.$2");  /* 「0139400」→「0.139400」、「028889375」→「0.028889375」 OCR 丢小数点（首位 0 + 6~8 位；电量等大数首位非 0 不误伤） */
     return t;
   };
   const items=[];
