@@ -59,12 +59,12 @@ pre.raw{background:#0a1322;border:1px solid var(--line);border-radius:6px;paddin
     <div class="drop" id="drop">
       <div style="font-size:15px;margin-bottom:6px">点击选择，或把文件拖到这里（可多选）</div>
       <div class="hint">省份与月份自动从文件名识别（如 <code>202610安徽代理购电.pdf</code>），也可在卡片上手动改</div>
-      <input type="file" id="file" multiple accept=".pdf,.png,.jpg,.jpeg" style="display:none">
+      <input type="file" id="file" multiple accept=".pdf,.png,.jpg,.jpeg" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0.01">
     </div>
     <div class="row">
       <button class="btn ghost" id="btnManual">+ 手动新增一个省/月</button>
       <button class="btn ghost" id="btnLoad">载入本地 data.json</button>
-      <input type="file" id="fileJson" accept=".json" style="display:none">
+      <input type="file" id="fileJson" accept=".json" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0.01">
       <span id="stat" class="hint"></span>
     </div>
     <div id="log"></div>
@@ -77,6 +77,7 @@ pre.raw{background:#0a1322;border:1px solid var(--line);border-radius:6px;paddin
       · <b>代理购电价格 / 线损 / 基金 / 系统运行费</b>：这四项是全省一致的量，在电价表里通常是<b>跨 8 行的合并单元格</b>。解析器按 x 坐标把表聚成列，再用恒等式「平段电价 − 输配电价 = 四项之和」锁定正确的四列；取不到时回退到公告注释段与上月值。<br>
       · <b>综合平段电价</b> = 代理 + 线损 + 输配电价(档) + 基金 + 系统运行费，<b>随档位变化</b>，改任一格自动重算。<br>
       · 每档右侧显示「表内对上 / 待确认」：绿色表示该档综合平段确实能在公告表格里找到同一个数字（云南等省公告平段列不含系统运行费时，自动按「平段+系统运行费」交叉验证）。<br>
+      · <b>分档系统运行费</b>：个别省份（如浙江）系统运行费按「1-10(20)千伏及以上 / 不满1千伏」分档，解析器会从价格信息表里识别该分档并在档位表右侧加一列核对；此时「系统运行费用」列显示 ≥10kV 档的值。<br>
       · <b>逐页 OCR</b>：表格或信息公开表是贴图的 PDF（如云南、扫描件）会逐页自动识别；纯文字注释页直接读文字层。OCR 读不出的格子也能照着公告手工填。
     </div>
   </div>
@@ -154,6 +155,63 @@ const TABLE_NO_XITONG={"云南":true};
 /* 单一制（其他用电）政府性基金 比 两部制 高出部分。广西公告：「农网还贷资金，其中：两部制用电1.5分钱，其他各类用电2.5分钱」→ 高 0.01。
    2026-10-27 全量扫描 92 份有文字层公告，全国仅广西存在该差异。 */
 const JIJIN_DAN_DELTA={"广西":0.01};
+/* 系统运行费按「≥10kV / 不满1kV」分两档的省份（浙江等，源自公告《价格信息表》「系统运行费用折合度电水平」行的两列）：
+   各档的真实系统运行费 = xitong − (xtHi − 该档平段列里的「系统运行费用折价」值)。
+   求解出来的 xitong 代表 ≥10kV 档（恒等式校验都在那 8 档上做），不满1kV 行不参与恒等式。 */
+const XITONG_TIERED={"浙江":true};
+
+function findXitongTiers(rows){
+  /* 在公告《价格信息表》里找「系统运行费用折合度电水平」行：
+     该行的 数值 列被拆成「≥10kV 用户」和「不满1kV 用户」两列（浙江 2026 起）。
+     注意表头是跨行的：「系统运行费用折合度电水平」标签、两个分档表头、两个数值可能分布在相邻几行。 */
+  const rx=/(千伏及以上|10（?20）?千伏|1-10)/, ry=/(不满\s*1\s*千伏|不满1千伏|不满1$)/;
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i];
+    if(!/系统运行费用折合度电水平|系统运行费折合度电水平/.test(r.text)) continue;
+    const rowY=r.y;
+    /* 在标签行 ±60 内找两个分档表头与数值（数值通常在标签上方，表头与数值同一带） */
+    let hiHead=null, loHead=null;
+    const nums=[];
+    for(let j=Math.max(0,i-8);j<Math.min(i+8,rows.length);j++){
+      const r2=rows[j];
+      if(Math.abs(r2.y-rowY)>60) continue;
+      /* 兼容：表头可能被拆成多行（如「1-10（20）千伏及以上工」+「商业用户」），
+         或「不满1」+「千伏工商业用户」分属两行；所以逐行用 rowText 匹配 */
+      const rowText=r2.text.replace(/\s+/g,"");
+      if(rx.test(rowText)&&!/不满/.test(rowText)) hiHead={x:(r2.items.find(it=>rx.test(String(it.s).replace(/\s+/g,"")))||{x:r2.x||0}).x,y:r2.y};
+      if(ry.test(rowText)) loHead={x:(r2.items.find(it=>ry.test(String(it.s).replace(/\s+/g,"")))||{x:r2.x||0}).x,y:r2.y};
+      /* 只取离标签行最近的两个（y 差最小），防止把上下行的其它数值混进来 */
+      for(const n of r2.nums){
+        /* 只收「电价信息表右侧数值列」里的数（x≈580~820），避免把序号、公式编号误收进来 */
+        if(inRange("xitong",n.v)&&n.x>550&&n.x<820) nums.push({v:n.v,x:n.x,dy:Math.abs(r2.y-rowY)});
+      }
+      nums.sort((a,b)=>a.dy-b.dy); nums.length=Math.min(nums.length,2);
+    }
+    if(hiHead&&loHead){
+      /* 每个表头列正下方/附近的数值：|numX - headX| < 列半宽（估 60） */
+      const pick=(hx)=>{ const c=nums.filter(n=>Math.abs(n.x-hx)<60); return c.length?c[0].v:null; };
+      /* 浏览器与本地提取的坐标会有差异，按表头 x 配对可能把 hi/lo 配反
+         （浙江10月浏览器实测出现过 hi=0.060399/lo=0.070583 的颠倒）。
+         已知省份（浙江 9/10 月）≥10kV 档恒高于不满1kV 档 → 统一按大小归位；
+         若将来出现「不满1kV 更高」的省，需要回看此处。 */
+      const norm=(a,b)=>a>=b?{hi:a,lo:b}:{hi:b,lo:a};
+      const hiV=pick(hiHead.x), loV=pick(loHead.x);
+      if(hiV!=null&&loV!=null) return norm(hiV,loV);
+      /* 退化：数值只有两个且顺序与表头 x 顺序一致 */
+      if(nums.length>=2){
+        const s=[...nums].sort((a,b)=>a.x-b.x);
+        return norm(s[s.length-1].v,s[0].v);
+      }
+    }
+  }
+  return null;
+}
+/* 「系统运行费用折价」在电价表内的列 x 不固定（表宽随排版浮动），
+   用表头定位优先，找不到再退回默认值 342 */
+function xitongColX(hdr){
+  if(hdr&&hdr.xitong&&hdr.xitong.length) return hdr.xitong[0].x;
+  return 342;
+}
 
 function findHeaderXs(items,tierRows){
   if(!tierRows.length) return null;
@@ -207,9 +265,15 @@ function findK(cols,dg,avail,delta){
     const ks=[];
     for(const t of avail){ const v=col.vals[t]; if(v==null) continue; ks.push(v-dg[t]-(t.indexOf("单一制")===0?(delta||0):0)); }
     if(ks.length<Math.max(2,Math.ceil(avail.length*0.6))) continue;
-    const med=median(ks);
+    let med=median(ks);
+    /* OCR 页常有个别档位的数字被邻列粘连污染（河南单一制35kV 平段读成 10.582019375），
+       若要求全部档位一致会把正确的平段列整列否定。改为「容 1~少数离群」：
+       以中位数取 ≥60% 的一致子集（与原判据同样严格），离群档位不计入 spread。 */
+    let inl=ks.filter(k=>Math.abs(k-med)<=0.0022);
+    if(inl.length<Math.max(2,Math.ceil(avail.length*0.6))) continue;
+    med=median(inl);
     if(med<0.05||med>1.25) continue;
-    const spread=Math.max(...ks.map(k=>Math.abs(k-med)));
+    const spread=Math.max(...inl.map(k=>Math.abs(k-med)));
     if(spread>0.0022) continue;
     if(col.med<0.15||col.med>1.8) continue;
     cands.push({x:col.x,k:r6(med),n:ks.length,spread,med:col.med});
@@ -301,10 +365,12 @@ function jijinFen(rows){
     const parts=t.split(FEN_ITEMS);
     for(let i=1;i<parts.length;i+=2){
       const seg=parts[i+1]||"";
-      /* 「0.105 分钱」或湖南「2 分、」：取紧跟「分」的数值（排除 分之/分钟/分时） */
-      const km=seg.match(/-?\d+(?:\.\d+)?\s*分(?![:之钟内])/);
+      /* 「0.105 分钱」或湖南「2 分、」：取紧跟「分」的数值（排除 分之/分钟/分时）。
+         浙江表注里 0.62 与「分」分属两个词、去空格后被「注」字粘住（…基金0.62注1.电网…），
+         故按取首个数值并截断在首个中文字前 */
+      const km=seg.match(/-?\d+(?:\.\d+)?\s*分(?![:之钟内])/) || seg.match(/^\s*(-?\d+(?:\.\d+)?)/);
       if(!km) continue;
-      const toks=[parseFloat(km[0].replace(/\s*分.*/,""))].filter(v=>Math.abs(v)<30);
+      const toks=[parseFloat(String(km[1]!=null?km[1]:km[0]).replace(/\s*分.*/,""))].filter(v=>Math.abs(v)<30);
       if(!toks.length) continue;
       const kw=parts[i].replace("后期扶持基金","后期扶持资金");
       seen.set(kw,toks[toks.length-1]);
@@ -350,7 +416,7 @@ function parseAnnouncement(items,opt){
       if(hr.size===1) vr=[...hr][0];
     }
     if(vr===null||vr===0){
-      /* 合并格标量行（无电压等级标签，如浙江 y=243 的系统运行费、y=284 的代理价/线损/基金）。
+      /* 合并格标量行（无电压等级标签，如浙江 y=243 的系统运行费、河南 y=930 的代理价/线损/基金/系统运行费）。
          这类行的数字适用于所在区块的所有档位，先收集起来，主流程失败时兜底广播 */
       const ns=(used.nums||[]).filter(n=>n.v>-0.31&&n.v<0.99);
       if(ns.length) orphans.push({row:used,y:used.y,p:used.p||1,nums:used.nums});
@@ -417,11 +483,11 @@ function parseAnnouncement(items,opt){
   let scalar={}, conf={};
   let solved=(K!=null)?solveScalars(cols,K,hdr,prior,prose0(rows)):null;
   if(solved) for(const f of SCALARS){ scalar[f]=r6(solved[f].med); conf[f]={src:"列+恒等式", n:solved[f].cnt, ok:true}; }
-  /* 合并格标量行回收（最后兜底，仅在恒等式路线失败时启用）：
-     四个标量在电价表里常是「跨多行合并单元格」，pdf.js 提取后落在无电压标签的
-     独立行上被 rawTier 循环丢弃（浙江系统运行费 0.070583 就单独成行 y=243），
+  /* 合并格标量行回收（兜底，仅在恒等式路线失败时启用）：
+     四个标量在电价表里常是「跨多行合并单元格」，提取后落在无电压标签的独立行上被 rawTier 丢弃
+     （浙江系统运行费单独成行、河南四个标量同在 y=930 一行），
      → buildColumns 聚不出标量列 → K 定位不到 → 静默回退上月旧值。
-     把紧贴档位区块（|Δy|<100）的孤立行数字广播回每一档的 cells 再解一次。 */
+     把紧贴档位区块（|Δy|<120）的孤立行数字广播回每一档的 cells 再解一次。 */
   if(!solved&&orphans.length&&avail.length){
     const seenS=new Set(), share=[];
     for(const o of orphans){
@@ -431,7 +497,7 @@ function parseAnnouncement(items,opt){
         const d=Math.abs(t.row.y-o.y);
         if(near==null||d<near) near=d;
       }
-      if(near==null||near>100) continue;
+      if(near==null||near>120) continue;
       for(const n of o.nums){
         if(!SCALARS.some(f=>inRange(f,n.v))) continue;
         const kk=r6(n.v);
@@ -593,6 +659,27 @@ function parseAnnouncement(items,opt){
             xitong:scalar.xitong!=null?scalar.xitong:null, zonghe_dg:null};
     if(dg[t]!=null&&SCALARS.every(f=>scalar[f]!=null)) rec[t].zonghe_dg=r6(SCALARS.reduce((a,f)=>a+scalar[f],0)+dg[t]+jd);
   }
+  /* 分档系统运行费省（浙江等）：从信息表读两档值，各档实际系统运行费 = xitong − (xtHi − 该档表内值) */
+  let xt=null;
+  if(XITONG_TIERED[prov]){
+    xt=findXitongTiers(rows);
+    if(xt&&scalar.xitong!=null){
+      /* 浙江表内「系统运行费用折价」列 x≈342，只出现在 不满1千伏 行（值=0.060399）；
+         其余 8 档该列为空，表示系统运行费=xt.hi=0.070583（与求解值一致）。
+         因此：不满1kV 档的实际系统运行费 = xitong − (xt.hi − xt.lo)，其余档保持 xitong。 */
+      const loDiff=xt.hi-xt.lo;   /* 0.070583-0.060399 = 0.010184 */
+      for(const t of TIERS){
+        /* TIERS 数组里目前没有「不满1千伏」档，但保留此分支以便将来扩展；
+           当前浙江公告的 8 个电压档系统运行费都等于 xt.hi */
+        if(t.indexOf("不满1")>=0){
+          rec[t].xitong_t=r6(scalar.xitong-loDiff);
+          rec[t].zonghe_dg=r6(rec[t].agent+rec[t].xiansun+rec[t].dg+rec[t].jijin+rec[t].xitong_t);
+        } else {
+          rec[t].xitong_t=scalar.xitong;   /* 与表内一致 */
+        }
+      }
+    } else if(scalar.xitong!=null) warns.push("未能从信息表读到系统运行费分档，各档暂用同一值，请人工核对");
+  }
   const hit={};
   for(const t of avail){
     const z=rec[t].zonghe_dg;
@@ -607,7 +694,7 @@ function parseAnnouncement(items,opt){
       warns.push("该省公告平段列不含系统运行费，已按「平段+系统运行费」与表内数值交叉验证一致");
     }
   }
-  return {rec,dg,scalar,conf,K,warns,tiersFound:Object.keys(tierMap),hit,_cols:cols,_tierMap:tierMap};
+  return {rec,dg,scalar,conf,K,warns,tiersFound:Object.keys(tierMap),hit,_cols:cols,_tierMap:tierMap,xt,_hdr:hdr};
 }
 
 const PROV_ALIAS={"河北省":"河北南网","河北":"河北南网","内蒙古东部":"蒙东","内蒙古西部":"蒙西","蒙东电力":"蒙东"};
@@ -675,10 +762,7 @@ async function pdfItems(file){
       const ops=await pg.getOperatorList();
       hasImg=ops.fnArray.some(fn=>fn===pdfjsLib.OPS.paintImageXObject||fn===pdfjsLib.OPS.paintJpegXObject||fn===pdfjsLib.OPS.paintImageMaskXObject);
     }catch(e){}
-    /* 触发 OCR 的条件放宽为「有位图」**或「该页完全无文字层」**：
-       河南等省的公告是「纯矢量绘制」的扫描件（1290 条矢量路径、0 字符、0 位图），
-       旧判据 hasImg 恒为 false → 整份提取到 0 项 → 四个标量全部静默回退上月旧值 */
-    if((hasImg||tp.length===0)&&tp.length<80){
+    if(hasImg&&tp.length<80){
       try{
         await ensureTesseract();
         if(typeof Tesseract!=="undefined"){
@@ -687,6 +771,25 @@ async function pdfItems(file){
           if(numCnt(ocr)>numCnt(tp)+2||tp.length<15){ items.push(...ocr); continue; }
         }
       }catch(e){ /* OCR 失败则保留文字层 */ }
+    }
+    /* 整页曲线字（文字全部转曲）：无图、无文字层、但有几千条曲线 → 必须 OCR，
+       否则像河南202610 这种公告会整页空手而归 */
+    if(!hasImg&&tp.length===0){
+      let drawCnt=0;
+      try{
+        const pg=await doc.getPage(i);
+        const ops=await pg.getOperatorList();
+        drawCnt=ops.fnArray.filter(fn=>fn===pdfjsLib.OPS.curveTo||fn===pdfjsLib.OPS.constructPath).length;
+      }catch(e){}
+      if(drawCnt>800){
+        try{
+          await ensureTesseract();
+          if(typeof Tesseract!=="undefined"){
+            const ocr=await ocrPdfPage(doc,i);
+            if(ocr.length){ items.push(...ocr); continue; }
+          }
+        }catch(e){}
+      }
     }
     items.push(...tp);
   }
@@ -745,6 +848,32 @@ function cleanCanvas(data,w,h){
   for(let x=0;x<w;x++) if(vline[x]) for(let d=-2;d<=2;d++){ const xx=x+d; if(xx<0||xx>=w) continue; for(let r=0;r<h;r++) ink[r*w+xx]=0; }
   for(let i=0;i<N;i++){ const j=i*4; const v=ink[i]?0:255; data[j]=data[j+1]=data[j+2]=v; data[j+3]=255; }
 }
+/* OCR 常把同一行相邻列的数字粘成一个词（河南「0.0288893750.003305」= 基金+系统运行费、
+   「0.1680.028889375」= 输配电价+基金）。形态是 0.F1 0.F2 …：每个数的整数位只有 1 位（0），
+   它紧跟在前一个数小数部分的最后一位之后。切法：从第二个「.」起，向前让出 1 位当作下一个数的
+   整数位（该位本来也是 0，对前一个数而言就是无害的末位 0）。不适用时返回 null。 */
+function splitGlued(s){
+  if(!/^-?[\d.]+$/.test(s)) return null;
+  const dots=[]; for(let i=0;i<s.length;i++) if(s[i]===".") dots.push(i);
+  if(dots.length<2) return null;
+  let st0=0, neg=false;
+  if(s[0]==="-"){ neg=true; st0=1; }
+  const first=s.slice(st0,dots[0]);
+  if(!/^\d{1,2}$/.test(first)) return null;      /* 整数位不超过 2 位（如 36.8） */
+  const out=[];
+  for(let i=0;i<dots.length;i++){
+    const from=dots[i]+1;
+    const to=(i+1<dots.length)?dots[i+1]-1:s.length;
+    const fr=s.slice(from,to);
+    if(!/^\d+$/.test(fr)) return null;
+    const ip=(i===0)?first:s[dots[i]-1];
+    if(!/^\d$/.test(ip)) return null;
+    const v=(i===0&&neg?-1:1)*parseFloat(ip+"."+fr);
+    if(!isFinite(v)||Math.abs(v)>3) return null; /* 只认电价量级的数，避免误切编号/年份 */
+    out.push({s:String(v),len:(ip+"."+fr).length});
+  }
+  return out;
+}
 /* OCR 词 → 归一化 items：按行聚类、数字跨词合并、去杂质 */
 function ocrWordsToItems(words,scaleDiv){
   const norm=w=>{ const b=w.bbox||{x0:w.x,y0:w.y,x1:w.x+(w.w||0),y1:w.y+(w.h||0)};
@@ -786,6 +915,18 @@ function ocrWordsToItems(words,scaleDiv){
     for(const t of toks){
       const st=fixTok(t.s);
       if(!st) continue;
+      const gl=splitGlued(st);
+      if(gl){
+        /* 粘连词拆成多个 item，按字符数比例分摊宽度，让它们落回各自的列 */
+        const W=t.x1-t.x0, total=gl.reduce((a,g)=>a+g.len,0)||1;
+        let cx=t.x0;
+        for(const g of gl){
+          const gw=W*g.len/total;
+          items.push({p:1,s:g.s,x:Math.round(cx/scaleDiv),y:yTop,w:Math.max(1,Math.round(gw/scaleDiv)),h:hgt});
+          cx+=gw;
+        }
+        continue;
+      }
       items.push({p:1,s:st,x:Math.round(t.x0/scaleDiv),y:yTop,w:Math.round((t.x1-t.x0)/scaleDiv),h:hgt});
     }
   }
@@ -831,8 +972,9 @@ function priorOf(prov,month){
 function recalc(c){
   for(const t of TIERS){
     const r=c.rec[t];
-    r.zonghe_dg=(r.agent!=null&&r.xiansun!=null&&r.dg!=null&&r.jijin!=null&&r.xitong!=null)
-      ? r6(r.agent+r.xiansun+r.dg+r.jijin+r.xitong) : null;
+    const xt=r.xitong_t!=null?r.xitong_t:r.xitong;
+    r.zonghe_dg=(r.agent!=null&&r.xiansun!=null&&r.dg!=null&&r.jijin!=null&&xt!=null)
+      ? r6(r.agent+r.xiansun+r.dg+r.jijin+xt) : null;
   }
 }
 function relookup(c){
@@ -859,12 +1001,15 @@ function renderCards(){
       '<button class="btn ghost" data-k="prev">填入上月值</button>'+
       '<button class="btn ghost" data-k="del">删除</button>';
     const tb=document.createElement("div");
-    let html='<table class="grid"><thead><tr><th>电压档</th><th>代理购电价格</th><th>上网环节线损</th><th>电度输配电价</th><th>政府性基金及附加</th><th>系统运行费用</th><th>综合平段电价</th><th></th></tr></thead><tbody>';
+    const xtTiers=c.rec&&TIERS.some(t=>c.rec[t]&&c.rec[t].xitong_t!=null);
+    let html='<table class="grid"><thead><tr><th>电压档</th><th>代理购电价格</th><th>上网环节线损</th><th>电度输配电价</th><th>政府性基金及附加</th><th>系统运行费用'+(xtTiers?'(≥10kV档)':'')+'</th>'+(xtTiers?'<th>本档系统运行费</th>':'')+'<th>综合平段电价</th><th></th></tr></thead><tbody>';
     TIERS.forEach(t=>{
       const r=c.rec[t];
+      const isLoTier = xtTiers && r.xitong_t!=null && Math.abs(r.xitong_t - r.xitong)>1e-6;
       html+='<tr><td>'+t.replace("单一制","单一 ").replace("两部制","两部 ")+'</td>'+
         ["agent","xiansun","dg","jijin","xitong"].map(k=>
           '<td><input data-t="'+t+'" data-k="'+k+'" class="'+(k==="dg"?"dg":"")+'" value="'+(r[k]==null?"":r[k])+'"></td>').join("")+
+        (xtTiers?'<td><input data-t="'+t+'" data-k="xitong_t" value="'+(r.xitong_t==null?"":r.xitong_t)+'"'+(isLoTier?' style="color:var(--warn);font-weight:600"':'')+'></td>':'')+
         '<td><input class="zh" value="'+(r.zonghe_dg==null?"":r.zonghe_dg)+'" readonly></td>'+
         '<td style="text-align:left">'+(noTier(t)?'<span class="tag">公告无此档</span>':(c.hit[t]?'<span class="tag ok">表内对上</span>':'<span class="tag">待确认</span>'))+'</td></tr>';
     });
@@ -897,8 +1042,7 @@ function renderCards(){
         if(SCALARS.includes(k)) for(const tt of TIERS) c.rec[tt][k]=v;
         recalc(c); renderCards();
       };
-    });
-  });
+    });  });
   $("#actions").style.display=cards.length?"flex":"none";
   $("#stat").textContent="共 "+cards.length+" 个省份/月份待应用";
 }
@@ -917,7 +1061,7 @@ async function handleFile(file){
     const o2=parseAnnouncement(res.items,{prov,month,prior:priorOf(prov,month),scale:0.01});
     if(o2.K!=null){ out=o2; out.warns.push("表内单位为「分/千瓦时」，已自动换算成元"); }
   }
-  cards.push({id:++uid,prov,month,rec:out.rec,conf:out.conf,K:out.K,hit:out.hit,warns:out.warns,raw,name:file.name});
+  cards.push({id:++uid,prov,month,rec:out.rec,conf:out.conf,K:out.K,hit:out.hit,warns:out.warns,raw,name:file.name,xt:out.xt||null});
   log("完成："+file.name+" → "+prov+" "+month);
   renderCards();
 }
