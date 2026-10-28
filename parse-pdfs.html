@@ -280,9 +280,11 @@ function findK(cols,dg,avail,delta){
   }
   if(!cands.length) return null;
   cands.sort((a,b)=>a.k-b.k);
-  return cands[cands.length>>1];
+  const ret=cands[cands.length>>1];
+  ret.cands=cands;   /* 全部候选（按 k 升序）——合并格回收兜底需要遍历多个 K 尝试求解 */
+  return ret;
 }
-function solveScalars(cols,K,hdr,prior,prose){
+function solveScalars(cols,K,hdr,prior,prose,dgVals){
   const pool=cols.filter(c=>c.med!=null&&c.med>-0.31&&c.med<0.99);
   const n=pool.length, combos=[];
   for(let i=0;i<n;i++)for(let j=0;j<n;j++)for(let k=0;k<n;k++)for(let l=0;l<n;l++){
@@ -322,11 +324,14 @@ function solveScalars(cols,K,hdr,prior,prose){
         }
         if(prior&&prior[f]!=null&&Math.abs(p[f].med-prior[f])<1e-4) sc+=6;
         if(prior&&prior[f]!=null&&Math.abs(p[f].med-prior[f])>0.02) sc-=3;
+        /* 标量不可能恰好等于某档输配电价（河北南网深谷列 k=0.211 的错误组合把两部35kV dg=0.1333 当成了代理价） */
+        if(dgVals&&dgVals.some(dv=>dv!=null&&Math.abs(dv-p[f].med)<2e-4)) sc-=12;
       }
       if(!best||sc>best.sc) best={sc,p};
     }
   }
-  return best?best.p:null;
+  if(best){ best.p.__sc=best.sc; return best.p; }  /* 挂上得分供合并格回收兜底跨 K 比较 */
+  return null;
 }
 function kwInProse(rows,re,f){
   /* 行内各文本块用 \u0001 分隔再匹配：关键词允许被空格/换行拆开，
@@ -481,49 +486,8 @@ function parseAnnouncement(items,opt){
     jijin:kwInProse(rows,/政府性基金及附加|政府性基金/,"jijin")
   });
   let scalar={}, conf={};
-  let solved=(K!=null)?solveScalars(cols,K,hdr,prior,prose0(rows)):null;
+  let solved=(K!=null)?solveScalars(cols,K,hdr,prior,prose0(rows),Object.values(dg)):null;
   if(solved) for(const f of SCALARS){ scalar[f]=r6(solved[f].med); conf[f]={src:"列+恒等式", n:solved[f].cnt, ok:true}; }
-  /* 合并格标量行回收（兜底，仅在恒等式路线失败时启用）：
-     四个标量在电价表里常是「跨多行合并单元格」，提取后落在无电压标签的独立行上被 rawTier 丢弃
-     （浙江系统运行费单独成行、河南四个标量同在 y=930 一行），
-     → buildColumns 聚不出标量列 → K 定位不到 → 静默回退上月旧值。
-     把紧贴档位区块（|Δy|<120）的孤立行数字广播回每一档的 cells 再解一次。 */
-  if(!solved&&orphans.length&&avail.length){
-    const seenS=new Set(), share=[];
-    for(const o of orphans){
-      let near=null;
-      for(const t of rawTier){
-        if((t.row.p||1)!==o.p) continue;
-        const d=Math.abs(t.row.y-o.y);
-        if(near==null||d<near) near=d;
-      }
-      if(near==null||near>120) continue;
-      for(const n of o.nums){
-        if(!SCALARS.some(f=>inRange(f,n.v))) continue;
-        const kk=r6(n.v);
-        if(seenS.has(kk)) continue;
-        seenS.add(kk); share.push({v:kk,x:n.x,y:o.y,w:0,h:0});
-      }
-    }
-    if(share.length>=2){
-      const tm2={};
-      for(const k of Object.keys(tierMap)) tm2[k]={cells:tierMap[k].cells.concat(share), y:tierMap[k].y, row:tierMap[k].row};
-      const cols2=buildColumns(tm2,avail);
-      const Kc2=noXitongTab?null:findK(cols2,dg,avail,jdDan);
-      if(Kc2&&Kc2.cands&&Kc2.cands.length){
-        let best2=null;
-        for(const c of Kc2.cands){
-          const s4=solveScalars(cols2,c.k,hdr,prior,prose0(rows));
-          if(s4){ s4.__K=c.k; if(!best2||(s4.__sc||0)>(best2.__sc||0)) best2=s4; }
-        }
-        if(best2){
-          solved=best2; K=best2.__K;
-          for(const f of SCALARS){ scalar[f]=r6(best2[f].med); conf[f]={src:"合并格回收",n:best2[f].cnt,ok:false}; }
-          warns.push("标量由合并单元格行回收得到，请重点核对");
-        }
-      }
-    }
-  }
   /* 若档位行取自「1.5倍执行价格」表，只有代理价是 1.5 倍，其余三项同值：
      代理价 ≈ 注释候选 × 1.5 时，改用注释值 */
   let agentFixed=false;
@@ -572,7 +536,7 @@ function parseAnnouncement(items,opt){
       const miss=SCALARS.filter(g=>scalar[g]==null&&g!==f);
       if(miss.length===0){ let rest=K; for(const g of SCALARS) if(g!==f) rest-=(scalar[g]||0); if(inRange(f,rest)){pick=r6(rest);src="恒等式反解";} }
     }
-    if(pick==null&&prior&&prior[f]!=null){ pick=prior[f]; src="沿用上月"; }
+    /* 「沿用上月」是最后的最后手段，推迟到合并格回收之后统一做（见下方 priorBackfill） */
     if(pick!=null){ scalar[f]=pick; conf[f]={src,ok:false}; }
   }
 
@@ -597,6 +561,58 @@ function parseAnnouncement(items,opt){
       const rg=RANGE[miss];
       if(rv>=rg[0]&&rv<=rg[1]){ scalar[miss]=rv; conf[miss]={src:"平段反解(不含系统运行费)",ok:true}; }
     }
+  }
+
+  /* 合并格标量行回收（倒数第二手段：注释/分钱/残差等真实证据救不出 ≥3 项时才启用）：
+     四个标量在电价表里常是「跨多行合并单元格」，提取后落在无电压标签的独立行上被 rawTier 丢弃
+     （河北南网 7-10月：标量只出现在 220kV 行，其余档位行该列空白且输配电价反推歧义被丢弃）。
+     把紧贴档位区块（|Δy|<120）的孤立行数字广播回每一档的 cells 再解一次。
+     ⚠️ 必须排在「沿用上月」之前，否则上月旧值会抢先填满、回收永远不触发；
+        也必须排在注释救援之后，否则会覆盖注释给出的正确值（浙江 8/9 月教训）。
+     只补仍缺失的字段，已由注释等确认的值保留。 */
+  const nMiss=SCALARS.filter(f=>scalar[f]==null).length;
+  if(nMiss>=3&&orphans.length&&avail.length){
+    const seenS=new Set(), share=[];
+    for(const o of orphans){
+      let near=null;
+      for(const t of rawTier){
+        if((t.row.p||1)!==o.p) continue;
+        const d=Math.abs(t.row.y-o.y);
+        if(near==null||d<near) near=d;
+      }
+      if(near==null||near>120) continue;
+      for(const n of o.nums){
+        if(!SCALARS.some(f=>inRange(f,n.v))) continue;
+        const kk=r6(n.v);
+        if(seenS.has(kk)) continue;
+        seenS.add(kk); share.push({v:kk,x:n.x,y:o.y,w:0,h:0});
+      }
+    }
+    if(share.length>=2){
+      const tm2={};
+      for(const k of Object.keys(tierMap)) tm2[k]={cells:tierMap[k].cells.concat(share), y:tierMap[k].y, row:tierMap[k].row};
+      const cols2=buildColumns(tm2,avail);
+      const Kc2=noXitongTab?null:findK(cols2,dg,avail,jdDan);
+      if(Kc2&&Kc2.cands&&Kc2.cands.length){
+        let best2=null;
+        for(const c of Kc2.cands){
+          const s4=solveScalars(cols2,c.k,hdr,prior,prose0(rows),Object.values(dg));
+          if(s4){ s4.__K=c.k; if(!best2||(s4.__sc||0)>(best2.__sc||0)) best2=s4; }
+        }
+        if(best2){
+          let filled=0;
+          for(const f of SCALARS){
+            if(scalar[f]!=null) continue;
+            scalar[f]=r6(best2[f].med); conf[f]={src:"合并格回收",n:best2[f].cnt,ok:false}; filled++;
+          }
+          if(filled){ K=best2.__K; warns.push("标量由合并单元格行回收得到，请重点核对"); }
+        }
+      }
+    }
+  }
+  /* 实在没有任何证据的字段，回退上月值（最后手段） */
+  for(const f of SCALARS){
+    if(scalar[f]==null&&prior&&prior[f]!=null){ scalar[f]=prior[f]; conf[f]={src:"沿用上月",ok:false}; }
   }
 
   /* 恒等式组合校正：四项之和应等于 K（平段-输配电价）。
@@ -891,6 +907,7 @@ function ocrWordsToItems(words,scaleDiv){
   const fixTok=t=>{
     t=t.replace(/\s+/g,"").replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
        .replace(/[，]/g,"，").replace(/[．]/g,".");
+    t=t.replace(/^(\d{1,3}),(\d{6,})$/,"$1.$2");   /* 「0,02353800」→「0.02353800」 OCR 把小数点读成逗号（千位分隔符逗号后恒为 3 位，不会误伤） */
     t=t.replace(/(^|[^\d.])\.(\d+)/g,"$10.$2");   /* 「《.613091」→「0.613091」 */
     t=t.replace(/(^|[^\d.])0(\d{6})(?![\d.])/g,"$10.$2");  /* 「0139400」→「0.139400」 OCR 丢小数点 */
     return t;
