@@ -252,14 +252,25 @@ function findHeaderXs(items,tierRows){
   const rows=buildRows(items);
   const out={}; for(const f of Object.keys(HDR_RE)) out[f]=[];
   for(const r of rows){
-    if(r.y<yTop-100||r.y>yTop+8) continue;
+    /* 甘肃 11 月 1486×466 小图：档位行 yTop=343，多行表头在 y=83~207，-100 窗口全覆盖不到
+       → hdr 全空 → jijin/xitong（和恒等、互换无差）失去唯一区分依据。放宽到 -380；
+       仍保留「行内命中 ≥2 个表头词」防正文误抓（标题行只命中 1 词会被排除） */
+    if(r.y<yTop-380||r.y>yTop+8) continue;
     const t=r.text.replace(/\s+/g,"");
     let n=0; for(const f of Object.keys(HDR_RE)) if(HDR_RE[f].some(re=>re.test(t))) n++;
     if(n<2) continue;
-    for(const it of r.items){
-      const s=String(it.s).replace(/\s+/g,"");
-      if(!s||/\d/.test(s)) continue;
-      for(const f of Object.keys(HDR_RE)) if(HDR_RE[f].some(re=>re.test(s))) out[f].push({x:it.x+(it.w||0)/2, y:r.y});
+    /* tesseract 常把表头小字拆成单字碎片（甘肃11月：「代理」「购」「电价」「格」…），
+       单 item 永远匹配不上 /代理购电/ /线损/ /系统运行/ → hdr 全空。
+       改滑窗拼接：从每个 item 起点向后拼 ≤5 个相邻无数字 item，首个命中即记录 x 中心并停 */
+    const its=(r.items||[]).map(it=>({s:String(it.s).replace(/\s+/g,""),x:it.x,w:it.w||0})).filter(i=>i.s&&!/\d/.test(i.s));
+    for(let a=0;a<its.length;a++){
+      let acc="";
+      for(let b=a;b<Math.min(its.length,a+5);b++){
+        acc+=its[b].s;
+        let hit=false;
+        for(const f of Object.keys(HDR_RE)) if(HDR_RE[f].some(re=>re.test(acc))){ out[f].push({x:(its[a].x+its[b].x+its[b].w)/2, y:r.y}); hit=true; break; }
+        if(hit) break;
+      }
     }
   }
   for(const f of Object.keys(out)){
@@ -362,6 +373,12 @@ function solveScalars(cols,K,hdr,prior,prose,dgVals){
   let best=null;
   const scoreP=(p,residMiss)=>{
     let sc=0;
+    /* 四列之和距 K 的距离罚分：正确组合的和恒=K（K 就是按它定义的），容差 0.0022 内
+       的「近似组合」（甘肃11月：线损取高峰列 0.006737 而非平段 0.005874，差 8.6e-4）
+       其他打分项完全同分、先到先得 → 必须显式罚分。3000/单位：8.6e-4 罚 2.6 分。
+       残差组合之和恒=K，罚分为 0，不受影响 */
+    let s4=0; for(const f of SCALARS) s4+=p[f].med;
+    sc -= Math.abs(s4-K)*3000;
     for(const f of SCALARS){
       sc += p[f].cnt*2 - p[f].spread*300 + hdrScore(f,p[f].x);
       /* 注释值优先：注释/说明段里出现的数值若与该列一致加分，全不一致减分 */
