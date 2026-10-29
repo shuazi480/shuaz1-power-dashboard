@@ -329,8 +329,23 @@ function solveScalars(cols,K,hdr,prior,prose,dgVals){
     for(const x of c) if(!SCALARS.some(f=>inRange(f,x.med))){ok=false;break;}
     if(ok) combos.push(c);
   }
-  if(!combos.length) return null;
-  const hdrScore=(f,x)=>{ if(!hdr||!hdr[f]||!hdr[f].length) return 0; let bd=Infinity; for(const h of hdr[f]) bd=Math.min(bd,Math.abs(h.x-x)); return bd<20?12:(bd<45?5:0); };
+  /* 残差组合：3 列来自 pool，第 4 字段 = K − 三列之和（缺失字段四选一轮转）。
+     新疆10月：「代理购电价格」合并格竖排 高峰/平/谷 三值，OCR 只读出低谷 0.021406，
+     平段 0.138082 漏读 → 平段组合只能靠残差救出 agent；低谷代理价 0.021406 又低于
+     agent 下界 0.08，「3列+残差」是唯一能同时给出正确平段值的途径。 */
+  const resid=[];
+  for(let mi=0;mi<4;mi++){
+    for(let i=0;i<n;i++)for(let j=0;j<n;j++)for(let k=0;k<n;k++){
+      if(i===j||i===k||j===k) continue;
+      const c3=[pool[i],pool[j],pool[k]];
+      const rv=r6(K-c3.reduce((a,x)=>a+x.med,0));
+      if(!inRange(SCALARS[mi],rv)) continue;
+      if(Math.abs(rv-Math.round(rv))<1e-9) continue;   /* 残差不可能为整数（注释编号「1.」等） */
+      resid.push({c3,miss:SCALARS[mi],rv});
+    }
+  }
+  if(!combos.length&&!resid.length) return null;
+  const hdrScore=(f,x)=>{ if(!hdr||!hdr[f]||!hdr[f].length||!isFinite(x)) return 0; let bd=Infinity; for(const h of hdr[f]) bd=Math.min(bd,Math.abs(h.x-x)); return bd<20?12:(bd<45?5:0); };
   const assign=(c0)=>{
     const perms=[], map={};
     const rec=(idx,used)=>{
@@ -345,21 +360,54 @@ function solveScalars(cols,K,hdr,prior,prose,dgVals){
     return perms;
   };
   let best=null;
+  const scoreP=(p,residMiss)=>{
+    let sc=0;
+    for(const f of SCALARS){
+      sc += p[f].cnt*2 - p[f].spread*300 + hdrScore(f,p[f].x);
+      /* 注释值优先：注释/说明段里出现的数值若与该列一致加分，全不一致减分 */
+      if(prose&&prose[f]&&prose[f].length){
+        if(prose[f].some(c=>Math.abs(c.v-p[f].med)<1e-6)) sc+=12;
+        else sc-=5;
+      }
+      if(prior&&prior[f]!=null&&Math.abs(p[f].med-prior[f])<1e-4) sc+=6;
+      if(prior&&prior[f]!=null&&Math.abs(p[f].med-prior[f])>0.02) sc-=3;
+      /* 标量不可能恰好等于某档输配电价（河北南网深谷列 k=0.211 的错误组合把两部35kV dg=0.1333 当成了代理价） */
+      if(dgVals&&dgVals.some(dv=>dv!=null&&Math.abs(dv-p[f].med)<2e-4)) sc-=12;
+      if(f===residMiss) sc-=4;   /* 残差字段证据弱于列值 */
+    }
+    return sc;
+  };
   for(const c0 of combos){
     for(const p of assign(c0)){
-      let sc=0;
-      for(const f of SCALARS){
-        sc += p[f].cnt*2 - p[f].spread*300 + hdrScore(f,p[f].x);
-        /* 注释值优先：注释/说明段里出现的数值若与该列一致加分，全不一致减分 */
-        if(prose&&prose[f]&&prose[f].length){
-          if(prose[f].some(c=>Math.abs(c.v-p[f].med)<1e-6)) sc+=12;
-          else sc-=5;
-        }
-        if(prior&&prior[f]!=null&&Math.abs(p[f].med-prior[f])<1e-4) sc+=6;
-        if(prior&&prior[f]!=null&&Math.abs(p[f].med-prior[f])>0.02) sc-=3;
-        /* 标量不可能恰好等于某档输配电价（河北南网深谷列 k=0.211 的错误组合把两部35kV dg=0.1333 当成了代理价） */
-        if(dgVals&&dgVals.some(dv=>dv!=null&&Math.abs(dv-p[f].med)<2e-4)) sc-=12;
-      }
+      const sc=scoreP(p,null);
+      if(!best||sc>best.sc) best={sc,p};
+    }
+  }
+  /* 残差组合：miss 以外的三个字段做 3! 排列 */
+  const perm3=(arr)=>{
+    if(arr.length===1) return [arr];
+    const out=[];
+    for(let i=0;i<arr.length;i++){
+      const rest=arr.slice(0,i).concat(arr.slice(i+1));
+      for(const p2 of perm3(rest)) out.push([arr[i]].concat(p2));
+    }
+    return out;
+  };
+  /* 残差组合（仅在没有任何 4 列组合时启用——4 列证据永远强于 3列+残差，
+     否则浙江10月/蒙西8月会被残差解抢走正确组合） */
+  for(const r0 of (!combos.length?resid:[])){
+    const others=SCALARS.filter(f=>f!==r0.miss);
+    for(const order of perm3(others)){
+      /* 每列分配到字段时也必须过范围检查（缺失会导致蒙西8月假解：0.292271 被当成线损） */
+      let ok=true;
+      for(let i2=0;i2<order.length;i2++){ if(!inRange(order[i2],r0.c3[i2].med)){ok=false;break;} }
+      if(!ok) continue;
+      const p={};
+      order.forEach((f,idx)=>{ p[f]=r0.c3[idx]; });
+      p[r0.miss]={med:r0.rv,cnt:0,spread:0,x:NaN};
+      const sc=scoreP(p,r0.miss);
+      if(sc<-20) continue;   /* 残差假解门槛：列混乱时 K−三列会凑出范围内假值（浙江10月 sc=-7538），
+                                真残差解（新疆10月 sc=+2）列证据整齐得分高 */
       if(!best||sc>best.sc) best={sc,p};
     }
   }
@@ -409,8 +457,10 @@ function sumTable(rows){
     const v=pickNum(r);
     if(v==null) continue;
     /* 「购电价格」OCR 常错字（惟格），锚「购电+价/格」并排除电量行、倍价行、备注行；
-       「、」排除注释里的顿号列举句（河南「注1.电网企业代理购电工商业用户电价由…」曾被当成 agent=1） */
-    if(/购电/.test(t)&&/价|格/.test(t)&&!/平均|偏差|电量|规模|倍|备注|补贴|、/.test(t)&&!/^注/.test(t)&&v>0.05&&v<1.1) out.agent.push({v,s:10});
+       「、」排除注释里的顿号列举句（河南「注1.电网企业代理购电工商业用户电价由…」曾被当成 agent=1）；
+       「=」排除公式行（新疆表头「7=2:尖峰+3+4+5+6」拆行后含「购电价格」且行尾数字=1）；
+       非整数：注释编号「1.」读出的 1 不是合法代理价（代理价恒为 0.xxxx 形态） */
+    if(/购电/.test(t)&&/价|格/.test(t)&&!/平均|偏差|电量|规模|倍|备注|补贴|、|=/.test(t)&&!/^注/.test(t)&&v>0.05&&v<1.1&&Math.abs(v-Math.round(v))>1e-9) out.agent.push({v,s:10});
     else if(/平均/.test(t)&&/购电价格|上网电价/.test(t)) avg=v;
     else if(/偏差/.test(t)&&v>-0.15&&v<0.15) dev=v;
     if(/线/.test(t)&&/折价/.test(t)&&!/偏差|损益/.test(t)&&v>0.002&&v<0.1) out.xiansun.push({v,s:10});
@@ -696,16 +746,45 @@ function parseAnnouncement(items,opt){
         seenS.add(kk); share.push({v:kk,x:it.x,y:o.y,w:0,h:0});
       }
     }
+    /* 多时段合并格（新疆式）：「代理购电价格」合并格里竖排 高峰/平时段/低谷 三个值（同 x）。
+       高峰/平/谷三列综合电价都满足恒等式（线损/基金/系统运行费不分时），三个候选都会解出自洽
+       组合，K 选到低谷/高峰列就会让代理价取错时段（新疆10月曾把低谷 0.021406 当线损）。
+       同 x 列 ≥3 个值且 ≥2 个在 agent 量程 → 竖排三时段，取中位数（=平时段），其余剔除 */
+    {
+      const byX=new Map();
+      for(const s of share){
+        const key=Math.round(s.x/10);
+        if(!byX.has(key)) byX.set(key,[]);
+        byX.get(key).push(s);
+      }
+      for(const arr of byX.values()){
+        if(arr.length<3) continue;
+        const sorted=[...arr].sort((a,b)=>a.v-b.v);
+        const nAg=sorted.filter(s=>inRange("agent",s.v)).length;
+        if(nAg<2) continue;
+        const mid=sorted[Math.floor(sorted.length/2)];
+        for(const s of arr){ if(s!==mid){ const i=share.indexOf(s); if(i>=0) share.splice(i,1); } }
+      }
+    }
     if(share.length>=2){
       const tm2={};
       for(const k of Object.keys(tierMap)) tm2[k]={cells:tierMap[k].cells.concat(share), y:tierMap[k].y, row:tierMap[k].row};
       const cols2=buildColumns(tm2,avail);
       const Kc2=noXitongTab?null:findK(cols2,dg,avail,jdDan);
       if(Kc2&&Kc2.cands&&Kc2.cands.length){
-        let best2=null;
+        const sols=[];
         for(const c of Kc2.cands){
           const s4=solveScalars(cols2,c.k,hdr,prior,prose0(rows),Object.values(dg));
-          if(s4){ s4.__K=c.k; if(!best2||(s4.__sc||0)>(best2.__sc||0)) best2=s4; }
+          if(s4){ s4.__K=c.k; sols.push(s4); }
+        }
+        let best2=null;
+        if(sols.length>=3){
+          /* 多时段表（新疆式）：高峰/平/谷三列综合电价都自洽（线损/基金/系统运行费不分时）。
+             k=四项之和+dg，代理价 高峰>平>谷 → k 升序取中位 = 平时段（口径：所有省份取平段） */
+          sols.sort((a,b)=>a.__K-b.__K);
+          best2=sols[sols.length>>1];
+        }else if(sols.length){
+          best2=sols.reduce((a,b)=>((b.__sc||0)>(a.__sc||0))?b:a);
         }
         if(best2){
           let filled=0;
