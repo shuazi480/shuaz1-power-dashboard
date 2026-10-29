@@ -155,7 +155,10 @@ function buildRows(items,scale){
 }
 function voltRank(text){
   const t=" "+text.replace(/\s+/g," ")+" ";
-  const q=t.replace(/\s+/g,"").replace(/千优/g,"千伏").replace(/干伏/g,"千伏").replace(/F4R/g,"千伏");
+  const q=t.replace(/\s+/g,"").replace(/千[优天代六茓芓玉丙]/g,"千伏").replace(/千伏/g,"千伏").replace(/干伏/g,"千伏").replace(/F4R/g,"千伏")
+           .replace(/11[（(〔【\[]千伏/g,"110千伏")            /* 「11(千伏」= 110千伏，0 被读成括号（湖南202610） */
+           .replace(/(^|[^0-9])3千伏/g,"$135千伏")            /* 「3千伏」不是真实档位 → 35千伏（5 丢失，湖南202610） */
+           .replace(/(^|[^0-9满])1千伏/g,"$110千伏");          /* 「1千伏」不是真实档位 → 10千伏（0 丢失，湖南202610）；排除「不满1千伏」 */
   if(/不满\s*1\s*千\s*伏/.test(q)) return 0;
   if(/220千伏|22〇千伏/.test(q)) return 4;
   if(/110千伏/.test(q)) return 3;
@@ -167,6 +170,18 @@ function voltRank(text){
   return null;
 }
 const RANK_NAME={0:"不满1千伏",1:"10kV",2:"35kV",3:"110kV",4:"220kV"};
+/* dg 反推时的「丢点整数」匹配：OCR 常把 0.1809 丢成整数 180900（小数点被读成下划线/杂字符）。
+   对 ≥5 位的整数 token 尝试 /10^k 还原，命中容差收紧到 1e-6（丢点时数字位精确，只有点丢失；
+   放宽到 2e-4 会让 163502→0.163502 这类电量大数误中 0.1635 的 dg）。 */
+function dgScaledHit(nums,dv){
+  if(dv==null||!nums) return false;
+  for(const n of nums){ if(Math.abs(n.v-dv)<2e-4) return true; }
+  for(const n of nums){
+    if(!Number.isInteger(n.v)||n.v<10000) continue;
+    for(let s=10;s<=1e9;s*=10){ if(Math.abs(n.v/s-dv)<1e-6) return true; }
+  }
+  return false;
+}
 /* 这些省公告电价表的平段列不含系统运行费（与该省信息公开表口径一致）：
    「综合平段=四项+输配电价」的恒等式在其中不成立，标量只能走信息公开表/注释，禁用恒等式求解与校正 */
 const TABLE_NO_XITONG={"云南":true};
@@ -472,7 +487,7 @@ function parseAnnouncement(items,opt){
       const hr=new Set();
       for(let rk=1;rk<=4;rk++) for(const zh of ["两部制","单一制"]){
         const dv=dg[zh+RANK_NAME[rk]];
-        if(dv!=null&&r.nums.some(n=>Math.abs(n.v-dv)<2e-4)) hr.add(rk);
+        if(dgScaledHit(r.nums,dv)) hr.add(rk);
       }
       if(hr.size===1) vr=[...hr][0];
     }
@@ -487,6 +502,24 @@ function parseAnnouncement(items,opt){
     seenRow.add(used); rawTier.push({row:used,rank:vr});
   }
   rawTier.sort((a,b)=>((a.row.p||1)-(b.row.p||1))||(a.row.y-b.row.y));
+  /* 第二张同构表截断：湖南等公告在主表下方还有「执行 1.5 倍」的第二张同构表，行结构完全重复，
+     会把 tierMap 里表1 缺失的档位（OCR 没认出 rank 的行）用表2 的错误数值补上，恰好污染平段列。
+     判据：同一页内相邻档位行的 y 间距远大于表内行距（>max(80, 6×中位行距)），且其后的 rank 在
+     前面出现过（确认是重复表）→ 从该行起整段丢弃。跨页不截断（单一制/两部制分页的省 rank 合法重复）。 */
+  if(rawTier.length>4){
+    const g=[]; for(let i=1;i<rawTier.length;i++){ if((rawTier[i].row.p||1)===(rawTier[i-1].row.p||1)) g.push(rawTier[i].row.y-rawTier[i-1].row.y); }
+    g.sort((a,b)=>a-b); const medG=g[Math.floor(g.length/2)]||12;
+    const cut=Math.max(80,medG*6);
+    for(let i=1;i<rawTier.length;i++){
+      const t=rawTier[i],pv=rawTier[i-1];
+      if((t.row.p||1)!==(pv.row.p||1)) continue;
+      if(t.row.y-pv.row.y>cut){
+        const before=new Set(rawTier.slice(0,i).map(x=>x.rank));
+        if(rawTier.slice(i).some(x=>before.has(x.rank))) rawTier.length=i;
+        break;
+      }
+    }
+  }
 
   const tierMap={};
   let lastZhi=null, lastY=null, lastP=null;
@@ -497,8 +530,7 @@ function parseAnnouncement(items,opt){
     else if(/单\s*一/.test(txt)) zhi="单一制";
     if(!zhi){
       const dTwo=dg["两部制"+RANK_NAME[t.rank]], dOne=dg["单一制"+RANK_NAME[t.rank]];
-      const mTwo=dTwo!=null&&t.row.nums.some(n=>Math.abs(n.v-dTwo)<2e-4);
-      const mOne=dOne!=null&&t.row.nums.some(n=>Math.abs(n.v-dOne)<2e-4);
+      const mTwo=dgScaledHit(t.row.nums,dTwo), mOne=dgScaledHit(t.row.nums,dOne);
       if(mTwo&&!mOne) zhi="两部制";
       else if(mOne&&!mTwo) zhi="单一制";
     }
@@ -901,7 +933,7 @@ async function pdfItems(file){
     }
     items.push(...tp);
   }
-  return {items,pages:doc.numPages};
+  return {items,pages:doc.numPages,doc};
 }
 /* 扫描件 PDF 逐页 OCR。
    ⚠️ 渲染分辨率必须自适应：固定 scale=2（144 DPI）会把高清扫描件（源图常 3000~4000px 宽）
@@ -910,12 +942,12 @@ async function pdfItems(file){
    做法：按页面宽度算 scale，让渲染宽度 ≈ OCR_TARGET_W；再用像素总量上限兜底，
    避免超大页面把 WASM 拖死（超过上限就逐步降 scale，最低不回到 144 DPI 以下）。 */
 const OCR_TARGET_W=2000, OCR_MAX_PX=14e6, OCR_MAX_SC=8;
-async function ocrPdfPage(doc,i){
+async function ocrPdfPage(doc,i,forceSc){
   const page=await doc.getPage(i);
   const base=page.getViewport({scale:1});
-  let sc=Math.max(2,Math.min(OCR_MAX_SC,OCR_TARGET_W/Math.max(base.width,1)));
-  const pxAt=s=>{const v=page.getViewport({scale:s});return v.width*v.height;};
-  while(sc>2&&pxAt(sc)>OCR_MAX_PX) sc=Math.max(2,sc*0.8);
+  let sc=forceSc||Math.max(2,Math.min(OCR_MAX_SC,OCR_TARGET_W/Math.max(base.width,1)));
+  if(!forceSc){ const pxAt=s=>{const v=page.getViewport({scale:s});return v.width*v.height;};
+    while(sc>2&&pxAt(sc)>OCR_MAX_PX) sc=Math.max(2,sc*0.8); }
   const vp=page.getViewport({scale:sc});
   const cv=document.createElement("canvas"); cv.width=vp.width; cv.height=vp.height;
   await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
@@ -1056,9 +1088,11 @@ function ocrWordsToItems(words,scaleDiv){
   }
   return items;
 }
-async function ocrImageBitmap(bmp,pageNo){
-  let scale=Math.min(1,3000/bmp.width);
-  if(bmp.width*scale<1100) scale=Math.min(2,1100/bmp.width);
+async function ocrImageBitmap(bmp,pageNo,forceScale){
+  /* 目标宽度与 PDF 通道一致（OCR_TARGET_W=2000）：湖南 3023px 原生分辨率 OCR 失败、
+     缩到 2000px 全对——tesseract 对渲染倍率不是单调改善，统一到已验证的 2000 档 */
+  let scale=forceScale||Math.min(1,OCR_TARGET_W/bmp.width);
+  if(!forceScale&&bmp.width*scale<1100) scale=Math.min(2,1100/bmp.width);
   const cw=Math.max(1,Math.round(bmp.width*scale)), ch=Math.max(1,Math.round(bmp.height*scale));
   const cv=document.createElement("canvas"); cv.width=cw; cv.height=ch;
   const cx=cv.getContext("2d",{willReadFrequently:true});
@@ -1067,6 +1101,27 @@ async function ocrImageBitmap(bmp,pageNo){
   const id=cx.getImageData(0,0,cw,ch);
   cleanCanvas(id.data,cw,ch);
   cx.putImageData(id,0,0);
+  /* 长图分带 OCR：canvas 高于 3000px 时整图一次 OCR 易漏认（且浏览器缩放质量差）。
+     按高度切带（带间重叠 140px 防切行），逐带识别后按 y 偏移拼回，重叠区去重 */
+  if(ch>3000){
+    const OV=140, BH=2400, words=[];
+    const bands=[];
+    for(let y=0;y<ch;y+=BH-OV){ bands.push([y,Math.min(ch,y+BH)]); if(y+BH>=ch) break; }
+    for(let bi=0;bi<bands.length;bi++){
+      const [y0,y1]=bands[bi];
+      const bc=document.createElement("canvas"); bc.width=cw; bc.height=y1-y0;
+      bc.getContext("2d",{willReadFrequently:true}).drawImage(cv,0,y0,cw,y1-y0,0,0,cw,y1-y0);
+      const out=await Tesseract.recognize(bc,"chi_sim+eng",{logger:()=>{}});
+      const lo=y0+(bi>0?OV/2:0), hi=y1-(bi<bands.length-1?OV/2:0);
+      for(const w of (out.data.words||[])){
+        if(!w.text||!w.text.trim()) continue;
+        const yc=((w.bbox.y0+w.bbox.y1)/2);
+        if(yc<lo||yc>=hi) continue;
+        words.push({text:w.text,bbox:{x0:w.bbox.x0,y0:w.bbox.y0+y0,x1:w.bbox.x1,y1:w.bbox.y1+y0}});
+      }
+    }
+    return ocrWordsToItems(words,scale).map(it=>({...it,p:pageNo||1}));
+  }
   const out=await Tesseract.recognize(cv,"chi_sim+eng",{logger:()=>{}});
   return ocrWordsToItems(out.data.words||[],scale).map(it=>({...it,p:pageNo||1}));
 }
@@ -1074,7 +1129,7 @@ async function ocrItems(file){
   const ok=await ensureTesseract();
   if(!ok) throw new Error("OCR 引擎加载失败（需联网访问 jsdelivr CDN）");
   const bmp=await createImageBitmap(file);
-  try{ return {items:await ocrImageBitmap(bmp,1),pages:1}; }
+  try{ return {items:await ocrImageBitmap(bmp,1),pages:1,bmpW:bmp.width,bmpH:bmp.height}; }
   finally{ try{bmp.close();}catch(e){} }
 }
 
@@ -1210,6 +1265,54 @@ async function handleFile(file){
   if(out.K==null){
     const o2=parseAnnouncement(res.items,{prov,month,prior:priorOf(prov,month),scale:0.01});
     if(o2.K!=null){ out=o2; out.warns.push("表内单位为「分/千瓦时」，已自动换算成元"); }
+  }
+  /* 144DPI 二次兜底：自适应高分辨率渲染（OCR_TARGET_W=2000）对河南这类 A4 转曲 PDF 反而更差
+     （242dpi 出 642 词 K=null，144dpi 出 1372 词全对——tesseract 对渲染倍率不是单调改善）。
+     首轮解析几乎全空时，用固定 scale=2 重 OCR 一遍，结果更好就采用。 */
+  if(res.doc){
+    const got=SCALARS.filter(f=>out.scalar[f]!=null&&!/内嵌/.test((out.conf[f]||{}).src||"")).length;
+    if((out.K==null?1:0)+got<=1){
+      try{
+        await ensureTesseract();
+        if(typeof Tesseract!=="undefined"){
+          const items2=[];
+          for(let i=1;i<=res.pages;i++){ try{ items2.push(...await ocrPdfPage(res.doc,i,2)); }catch(e){} }
+          if(items2.length){
+            let o3=parseAnnouncement(items2,{prov,month,prior:priorOf(prov,month),scale:1});
+            if(o3.K==null){ const o4=parseAnnouncement(items2,{prov,month,prior:priorOf(prov,month),scale:0.01}); if(o4.K!=null) o3=o4; }
+            const score=o=>(o.K!=null?10:0)+SCALARS.filter(f=>o.scalar[f]!=null&&!/内嵌/.test((o.conf[f]||{}).src||"")).length;
+            if(score(o3)>score(out)){ out=o3; out.warns.push("高分辨率渲染效果差，已按 144DPI 重试"); }
+          }
+        }
+      }catch(e){}
+    }
+  }else if(typeof res.bmpW==="number"){
+    /* 图片多尺度重试：浏览器 drawImage 的缩放算法与本地不同，2000px 失败的图换 2600px / 原生尺寸再试 */
+    const got=SCALARS.filter(f=>out.scalar[f]!=null&&!/内嵌/.test((out.conf[f]||{}).src||"")).length;
+    if((out.K==null?1:0)+got<=1){
+      try{
+        await ensureTesseract();
+        if(typeof Tesseract!=="undefined"){
+          const first=Math.min(1,OCR_TARGET_W/res.bmpW);
+          const cands=[];
+          const s26=Math.min(1,2600/res.bmpW); if(Math.abs(s26-first)/first>0.05) cands.push(s26);
+          let s1=1; while(res.bmpW*s1*res.bmpH*s1>30e6) s1*=0.85;   /* 画布面积上限保护 */
+          if(Math.abs(s1-first)/first>0.05) cands.push(s1);
+          for(const sc of cands){
+            let bmp2=null;
+            try{ bmp2=await createImageBitmap(file); }catch(e){ break; }
+            try{
+              const its=await ocrImageBitmap(bmp2,1,sc);
+              let o3=parseAnnouncement(its,{prov,month,prior:priorOf(prov,month),scale:1});
+              if(o3.K==null){ const o4=parseAnnouncement(its,{prov,month,prior:priorOf(prov,month),scale:0.01}); if(o4.K!=null) o3=o4; }
+              const score=o=>(o.K!=null?10:0)+SCALARS.filter(f=>o.scalar[f]!=null&&!/内嵌/.test((o.conf[f]||{}).src||"")).length;
+              if(score(o3)>score(out)){ out=o3; out.warns.push("首轮渲染分辨率效果差，已自动换档重试"); }
+              if(out.K!=null&&SCALARS.every(f=>out.scalar[f]!=null)) break;
+            }finally{ try{bmp2.close();}catch(e){} }
+          }
+        }
+      }catch(e){}
+    }
   }
   cards.push({id:++uid,prov,month,rec:out.rec,conf:out.conf,K:out.K,hit:out.hit,warns:out.warns,raw,name:file.name,xt:out.xt||null});
   log("完成："+file.name+" → "+prov+" "+month);
