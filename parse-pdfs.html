@@ -1197,7 +1197,7 @@ function ocrWordsToItems(words,scaleDiv){
   }
   return items;
 }
-async function ocrImageBitmap(bmp,pageNo,forceScale){
+async function ocrImageBitmap(bmp,pageNo,forceScale,noClean){
   /* 目标宽度与 PDF 通道一致（OCR_TARGET_W=2000）：湖南 3023px 原生分辨率 OCR 失败、
      缩到 2000px 全对——tesseract 对渲染倍率不是单调改善，统一到已验证的 2000 档 */
   let scale=forceScale||Math.min(1,OCR_TARGET_W/bmp.width);
@@ -1208,7 +1208,9 @@ async function ocrImageBitmap(bmp,pageNo,forceScale){
   cx.fillStyle="#fff"; cx.fillRect(0,0,cw,ch);
   cx.drawImage(bmp,0,0,cw,ch);
   const id=cx.getImageData(0,0,cw,ch);
-  cleanCanvas(id.data,cw,ch);
+  /* noClean：原生小截图（甘肃11月 1486px）表格线与文字贴得很近，去线会削坏数字轮廓
+     （0.057120 被认成 OOS7I）→ 四标量缺一、resid 又被列污染卡死。原图直读反而全对 */
+  if(!noClean) cleanCanvas(id.data,cw,ch);
   cx.putImageData(id,0,0);
   /* 长图分带 OCR：canvas 高于 3000px 时整图一次 OCR 易漏认（且浏览器缩放质量差）。
      按高度切带（带间重叠 140px 防切行），逐带识别后按 y 偏移拼回，重叠区去重 */
@@ -1395,27 +1397,36 @@ async function handleFile(file){
         }
       }catch(e){}
     }
-  }else if(typeof res.bmpW==="number"){
-    /* 图片多尺度重试：浏览器 drawImage 的缩放算法与本地不同，2000px 失败的图换 2600px / 原生尺寸再试 */
+  }  else if(typeof res.bmpW==="number"){
+    /* 图片多尺度重试：浏览器 drawImage 的缩放算法与本地不同，2000px 失败的图换 2600px / 原生尺寸再试。
+       触发条件除「几乎全空」外，再加「四项里低置信来源（合并格回收/残差/沿用上月）≥2」——
+       甘肃11月：K 对、四项都「有值」但全由合并格回收乱分（K 恒等式被 0 列满足），首轮不空所以
+       旧条件永不触发 */
     const got=SCALARS.filter(f=>out.scalar[f]!=null&&!/内嵌/.test((out.conf[f]||{}).src||"")).length;
-    if((out.K==null?1:0)+got<=1){
+    const lowConf=SCALARS.filter(f=>/合并格回收|恒等式残差|沿用上月/.test((out.conf[f]||{}).src||"")).length;
+    /* 评分：K 找到 + 高置信来源（列+恒等式/注释/分钱求和等）项数——同为「有值」时
+       低置信解（回收乱分）必须让位给高置信解 */
+    const score=o=>(o.K!=null?10:0)+SCALARS.filter(f=>{const s=(o.conf[f]||{}).src||""; return s&&!/内嵌/.test(s)&&!/合并格回收|恒等式残差|沿用上月/.test(s);}).length;
+    if((out.K==null?1:0)+got<=1 || lowConf>=2){
       try{
         await ensureTesseract();
         if(typeof Tesseract!=="undefined"){
           const first=Math.min(1,OCR_TARGET_W/res.bmpW);
           const cands=[];
-          const s26=Math.min(1,2600/res.bmpW); if(Math.abs(s26-first)/first>0.05) cands.push(s26);
+          /* 原生不清洗通道放最前：小而清晰的截图 cleanCanvas 是净伤害（见 ocrImageBitmap noClean 注） */
+          let sN=1; while(res.bmpW*sN*res.bmpH*sN>30e6) sN*=0.85;
+          cands.push({sc:sN,noClean:true});
+          const s26=Math.min(1,2600/res.bmpW); if(Math.abs(s26-first)/first>0.05) cands.push({sc:s26});
           let s1=1; while(res.bmpW*s1*res.bmpH*s1>30e6) s1*=0.85;   /* 画布面积上限保护 */
-          if(Math.abs(s1-first)/first>0.05) cands.push(s1);
-          for(const sc of cands){
+          if(Math.abs(s1-first)/first>0.05) cands.push({sc:s1});
+          for(const cd of cands){
             let bmp2=null;
             try{ bmp2=await createImageBitmap(file); }catch(e){ break; }
             try{
-              const its=await ocrImageBitmap(bmp2,1,sc);
+              const its=await ocrImageBitmap(bmp2,1,cd.sc,cd.noClean);
               let o3=parseAnnouncement(its,{prov,month,prior:priorOf(prov,month),scale:1});
               if(o3.K==null){ const o4=parseAnnouncement(its,{prov,month,prior:priorOf(prov,month),scale:0.01}); if(o4.K!=null) o3=o4; }
-              const score=o=>(o.K!=null?10:0)+SCALARS.filter(f=>o.scalar[f]!=null&&!/内嵌/.test((o.conf[f]||{}).src||"")).length;
-              if(score(o3)>score(out)){ out=o3; out.warns.push("首轮渲染分辨率效果差，已自动换档重试"); }
+              if(score(o3)>score(out)){ out=o3; out.warns.push(cd.noClean?"首轮去表格线误伤数字，已按原图不清洗重试":"首轮渲染分辨率效果差，已自动换档重试"); }
               if(out.K!=null&&SCALARS.every(f=>out.scalar[f]!=null)) break;
             }finally{ try{bmp2.close();}catch(e){} }
           }
