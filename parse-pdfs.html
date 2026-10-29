@@ -408,10 +408,10 @@ function solveScalars(cols,K,hdr,prior,prose,dgVals){
       const sc=scoreP(p,r0.miss);
       if(sc<-20) continue;   /* 残差假解门槛：列混乱时 K−三列会凑出范围内假值（浙江10月 sc=-7538），
                                 真残差解（新疆10月 sc=+2）列证据整齐得分高 */
-      if(!best||sc>best.sc) best={sc,p};
+      if(!best||sc>best.sc) best={sc,p,resid:true};
     }
   }
-  if(best){ best.p.__sc=best.sc; return best.p; }  /* 挂上得分供合并格回收兜底跨 K 比较 */
+  if(best){ best.p.__sc=best.sc; if(best.resid) best.p.__resid=true; return best.p; }  /* 挂上得分供合并格回收兜底跨 K 比较 */
   return null;
 }
 function kwInProse(rows,re,f){
@@ -626,6 +626,8 @@ function parseAnnouncement(items,opt){
   let scalar={}, conf={};
   let solved=(K!=null)?solveScalars(cols,K,hdr,prior,prose0(rows),Object.values(dg)):null;
   if(solved) for(const f of SCALARS){ scalar[f]=r6(solved[f].med); conf[f]={src:"列+恒等式", n:solved[f].cnt, ok:true}; }
+  /* 残差解恒等式恒成立（四项之和必=K），无法靠勾稽发现错误：低置信时至少提醒用户 */
+  if(solved&&solved.__resid&&(solved.__sc||0)<0) warns.push("四项由「恒等式+残差」低置信推出，请逐项核对");
   /* 若档位行取自「1.5倍执行价格」表，只有代理价是 1.5 倍，其余三项同值：
      代理价 ≈ 注释候选 × 1.5 时，改用注释值 */
   let agentFixed=false;
@@ -1054,9 +1056,20 @@ function cleanCanvas(data,w,h){
   const N=w*h;
   const ink=new Uint8Array(N);
   for(let i=0;i<N;i++){ const j=i*4; const g=(data[j]*299+data[j+1]*587+data[j+2]*114)/1000; ink[i]=g<230?1:0; }
-  /* 横线：一行墨迹 > 45% 宽 */
+  /* 横线：一行内「最长连续墨迹段(允许2px空隙)」> 45% 宽。不能用整行墨迹总数——
+     天津10月公告大标题为粗体大字，标题行整行墨迹总数 858>826(45%阈值) 会被误判成
+     表格线整行抹掉，版面分析被打乱 → 四标量合并格行 OCR 全灭、resid 凑出假解。
+     本地 clean_np.py 一直用最长段判法故无此问题（此前两版判定并不一致） */
   const hline=new Uint8Array(h);
-  for(let r=0;r<h;r++){ let c=0; for(let x=0;x<w;x++) c+=ink[r*w+x]; if(c>w*0.45) hline[r]=1; }
+  for(let r=0;r<h;r++){
+    let best=0,cur=0,gap=0;
+    for(let x=0;x<w;x++){
+      if(ink[r*w+x]){ cur++; gap=0; }
+      else{ gap++; if(gap>2){ if(cur>best) best=cur; cur=0; } }
+    }
+    if(cur>best) best=cur;
+    if(best>w*0.45) hline[r]=1;
+  }
   /* 竖线：在首末横线之间的行带内，找最长墨迹段 > 300px 的列 */
   let top=-1,bot=-1;
   for(let r=0;r<h;r++) if(hline[r]){ if(top<0) top=r; bot=r; }
