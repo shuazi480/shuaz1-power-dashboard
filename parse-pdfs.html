@@ -726,7 +726,35 @@ function parseAnnouncement(items,opt){
       const rg=RANGE[miss];
       if(rv>=rg[0]&&rv<=rg[1]){ scalar[miss]=rv; conf[miss]={src:"平段反解(不含系统运行费)",ok:true}; }
     }
+    /* 缺两项（云南202611：档位表里只有「线损」「基金」两列有值；代理价是全省一口价，
+       压根没印在档位表上，且这版公告只有电价表、没有信息公开表 → 三项里缺两项，
+       上面的「只缺一项」分支永不触发，四项全空）。
+       先用「各档同值 + 表头命中」的列把线损/基金补齐，再按 K3 反解代理价。
+       ⚠️ 列判据必须带「各档同值（spread≤0.0022）」：平段/高峰/低谷列逐档不同，
+          减去 dg 后 spread 远大于容差会被挡掉，不会误占代理价槽位。 */
+    if(TRI.filter(f=>scalar[f]==null).length>=2){
+      const hs2=(f,x)=>{ if(!hdr||!hdr[f]||!hdr[f].length||!isFinite(x)) return 0; let bd=Infinity; for(const h of hdr[f]) bd=Math.min(bd,Math.abs(h.x-x)); return bd<20?12:(bd<45?5:0); };
+      const need=Math.max(2,Math.ceil(avail.length*0.5));
+      for(const f of TRI){
+        if(scalar[f]!=null) continue;
+        let bc=null,bs=-Infinity;
+        for(const col of cols){
+          if(!inRange(f,col.med)||col.cnt<need||col.spread>0.0022) continue;
+          const sc=col.cnt*2-col.spread*300+hs2(f,col.x);
+          if(sc>bs){ bs=sc; bc=col; }
+        }
+        if(bc){ scalar[f]=r6(bc.med); conf[f]={src:"列(平段不含系统运行费)",n:bc.cnt,ok:true}; }
+      }
+      const m2=TRI.find(f=>scalar[f]==null);
+      if(m2&&TRI.filter(f=>f!==m2).every(f=>scalar[f]!=null)){
+        const rv=r6(Kc.k-TRI.filter(f=>f!==m2).reduce((a,f)=>a+scalar[f],0));
+        if(inRange(m2,rv)){ scalar[m2]=rv; conf[m2]={src:"平段反解(不含系统运行费)",ok:true}; }
+      }
+    }
   }
+  /* 这类省的电价表压根不印系统运行费列（云南11月整列是「–」），不是解析失败：
+     明确提示去《代理购电信息公开表》取，避免用户误判为解析器坏了 */
+  if(noXitongTab&&scalar.xitong==null) warns.push("该省电价表不含系统运行费（综合平段暂按 0 计入），需从《代理购电信息公开表》补齐");
 
   /* 合并格标量行回收（倒数第二手段：注释/分钱/残差等真实证据救不出 ≥3 项时才启用）：
      四个标量在电价表里常是「跨多行合并单元格」，提取后落在无电压标签的独立行上被 rawTier 丢弃
@@ -818,6 +846,10 @@ function parseAnnouncement(items,opt){
   }
   /* 实在没有任何证据的字段，回退上月值（最后手段） */
   for(const f of SCALARS){
+    /* 云南等「电价表不含系统运行费」的省：表内压根没这一列，沿用上月会把上月的真实值
+       当成本月值（云南202611：上月 0.038523，本月公告未公布、口径上按 0 计），
+       综合平段会被算成 0.515588 而非公告的 0.477065 → 宁可留空让用户对照信息公开表填 */
+    if(noXitongTab&&f==="xitong") continue;
     if(scalar[f]==null&&prior&&prior[f]!=null){ scalar[f]=prior[f]; conf[f]={src:"沿用上月",ok:false}; }
   }
 
@@ -882,12 +914,16 @@ function parseAnnouncement(items,opt){
   }
 
   const rec={};
+  /* 云南等省电价表不印系统运行费：代理/线损/基金三项齐了就能算综合平段，系统运行费按 0 计入
+     （口径与公告「平时段」列一致）。不能等 xitong 补齐，否则综合列永远空着、卡片全档「待确认」 */
+  const triReady=["agent","xiansun","jijin"].every(f=>scalar[f]!=null);
   for(const t of TIERS){
     const jd=(t.indexOf("单一制")===0?jdDan:0);   /* 单一制档位基金要加回差额 */
     rec[t]={agent:scalar.agent!=null?scalar.agent:null, xiansun:scalar.xiansun!=null?scalar.xiansun:null,
             dg:dg[t]!=null?dg[t]:null, jijin:scalar.jijin!=null?r6(scalar.jijin+jd):null,
             xitong:scalar.xitong!=null?scalar.xitong:null, zonghe_dg:null};
-    if(dg[t]!=null&&SCALARS.every(f=>scalar[f]!=null)) rec[t].zonghe_dg=r6(SCALARS.reduce((a,f)=>a+scalar[f],0)+dg[t]+jd);
+    if(dg[t]!=null&&(SCALARS.every(f=>scalar[f]!=null)||(noXitongTab&&triReady)))
+      rec[t].zonghe_dg=r6(SCALARS.reduce((a,f)=>a+(scalar[f]||0),0)+dg[t]+jd);
   }
   /* 分档系统运行费省（浙江等）：从信息表读两档值，各档实际系统运行费 = xitong − (xtHi − 该档表内值) */
   let xt=null;
