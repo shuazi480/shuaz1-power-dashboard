@@ -249,7 +249,7 @@ details.kd .kd-body code{color:var(--txt);background:var(--panel2);padding:1px 6
       <div class="kpis" id="ov-kpis"></div>
 
       <div class="card">
-        <h2><span class="dot"></span>全国综合平段电价（电网代购）月度走势<span class="tipwrap" data-tip="综合平段电价＝购电价＋上网环节线损＋电度输配电价＋政府性基金及附加＋系统运行费折价。2026 年电度输配电价随电压等级联动（1—7 月老版 / 8—10 月新版），2025 年为各省权威发布值。">ⓘ</span></h2>
+        <h2><span class="dot"></span>全国综合平段电价（电网代购）月度走势<span class="tipwrap" data-tip="综合平段电价＝购电价＋上网环节线损＋电度输配电价＋政府性基金及附加＋系统运行费折价。2026 年电度输配电价随电压等级联动（1—7 月老版 / 8 月起新版），2025 年为各省权威发布值。">ⓘ</span></h2>
         <div class="sub">单位：元/千瓦时 · 实线＝2026 全国均价 · 虚线＝2025 全国均价 · 阴影带＝2026 省间最高—最低区间</div>
         <div class="chart" id="ov-trend"></div>
         <div class="concl" id="ov-trend-concl"></div>
@@ -296,7 +296,7 @@ details.kd .kd-body code{color:var(--txt);background:var(--panel2);padding:1px 6
 
       <div class="card">
         <h2><span class="dot"></span>图一 · <span id="cmp-c1-title">江苏</span> 2025 vs 2026 代理购电价格</h2>
-        <div class="sub" id="cmp-c1-sub">单位：元/千瓦时 · 2025全年12月 / 2026年1—10月</div>
+        <div class="sub" id="cmp-c1-sub">单位：元/千瓦时 · 2025全年12月 / 2026年1—11月</div>
         <div class="chart" id="cmp-c1"></div>
         <div class="concl" id="cmp-c1-concl"></div>
       </div>
@@ -344,7 +344,7 @@ details.kd .kd-body code{color:var(--txt);background:var(--panel2);padding:1px 6
       </div>
       <div class="card">
         <h2><span class="dot"></span>入市 − 代购 差值 月度走势（签约省）<span class="tipwrap" data-tip="差值 = 综合平段电价【入市交易】−【电网代购】。0 线以下（负值）表示入市更省，以上表示入市更贵。">ⓘ</span></h2>
-        <div class="sub">单位：元/千瓦时 · 2026年1—10月 · 每条曲线=一个签约省 · 0线以下=入市更省</div>
+        <div class="sub">单位：元/千瓦时 · 2026年1—11月 · 每条曲线=一个签约省 · 0线以下=入市更省</div>
         <div class="chart tall" id="rus-diff"></div>
         <div class="concl" id="rus-diff-concl"></div>
       </div>
@@ -669,11 +669,11 @@ function drawOvTrend(){
     for(const p of NATPROVS){          // 全国均价按省级单元计，广东价区不重复加权
       const v25=cp25byVolt(p,"zonghe_dg")[i];
       if(v25!=null) s25.push([v25,p]);
-      if(i<9){ const v26=jd(d(p,curVolt,mm).zonghe_dg); if(v26!=null) s26.push([v26,p]); }
+      if(i<M9.length){ const v26=jd(d(p,curVolt,mm).zonghe_dg); if(v26!=null) s26.push([v26,p]); }
     }
     const avg=a=>a.length?a.reduce((s,x)=>s+x[0],0)/a.length:null;
-    n25.push(avg(s25)); n26.push(i<9?avg(s26):null);
-    if(i<9&&s26.length){ s26.sort((a,b)=>b[0]-a[0]); max26.push(s26[0][0]); hi26.push(s26[0][1]); min26.push(s26[s26.length-1][0]); lo26.push(s26[s26.length-1][1]); }
+    n25.push(avg(s25)); n26.push(i<M9.length?avg(s26):null);
+    if(i<M9.length&&s26.length){ s26.sort((a,b)=>b[0]-a[0]); max26.push(s26[0][0]); hi26.push(s26[0][1]); min26.push(s26[s26.length-1][0]); lo26.push(s26[s26.length-1][1]); }
     else{ max26.push(null); min26.push(null); hi26.push(null); lo26.push(null); }
   });
   const band=min26.map((v,i)=>(v!=null&&max26[i]!=null)?Number((max26[i]-v).toFixed(6)):null);
